@@ -28,6 +28,19 @@ Resolve controlling agreement and amendment
 
 The calculation code contains no `eval`, no model-generated code execution, and no LLM-issued verdict. A production extraction agent may propose structured facts and rules, but a human reviewer and the calculator remain the control boundary.
 
+The Python backend is the product core. Its external interface is the `CovenantWorkflow`: callers select a case and submit an optional reviewer decision. Behind that small interface, separate internal modules own the typed domain model, agreement catalog, deterministic calculator, evidence policy, evidence manifest, chained audit hashes, run history, and draft-certificate rendering. A real LangGraph state machine executes the control flow. The Next.js application is intentionally a thin, demo-ready presentation layer over those backend results.
+
+## Stack
+
+- **Frontend:** Next.js, CopilotKit, and AG-UI
+- **Backend:** Python, FastAPI, and LangGraph
+- **Application data:** Supabase Postgres with row-level security
+- **Documents and certificates:** private Supabase Storage bucket
+- **Authentication:** Supabase Auth bearer tokens
+- **Agent traces:** optional Neatlogs LangGraph callback integration
+
+All infrastructure integrations are optional in local demo mode. When Supabase is configured, the API validates the caller, stores run metadata, and writes the evidence artifact to private storage. Neatlogs receives operational identifiers and outcomes, never raw agreements or financial statement data.
+
 ## Run locally
 
 The project uses a Next.js UI and FastAPI service. Docker is the most reliable route because it includes Python and installs locked dependencies.
@@ -38,7 +51,7 @@ docker compose up --build
 
 Open <http://localhost:3000>. The API health endpoint is <http://localhost:8123/health>.
 
-No model key, database, or Supabase project is needed for the curated demonstration cases. The `.env.example` file documents environment values reserved for production persistence and document intake. The repository also includes an optional LiteLLM proxy configuration for controlled provider routing when an extraction-model integration is enabled.
+No model key, database, or Supabase project is needed for the curated demonstration cases. Copy `.env.example` to `.env` when enabling the production integrations. Apply `supabase/migrations/202609050001_covenant_certificate.sql` to provision the tables, row-level security policies, and private artifact bucket. The repository also includes an optional LiteLLM proxy configuration for controlled provider routing when a model-backed copilot is enabled; without a model key, the copilot uses its deterministic offline LangGraph path.
 
 ## API
 
@@ -47,6 +60,8 @@ GET  /health
 GET  /api/demo-cases
 GET  /api/cases/{case_id}
 POST /api/cases/{case_id}/run
+GET  /api/cases/{case_id}/history
+POST /ag-ui
 ```
 
 The last endpoint accepts an optional reviewer decision for the evidence-gap scenario:
@@ -54,6 +69,20 @@ The last endpoint accepts an optional reviewer decision for the evidence-gap sce
 ```json
 { "reviewer_decision": "approve_addback", "reviewer_name": "Treasury reviewer" }
 ```
+
+## Verify
+
+```bash
+cd apps/api
+uv sync --frozen
+uv run python -m unittest discover -s tests -v
+
+cd ../web
+npm ci
+npm run build
+```
+
+The backend suite covers the four verdict scenarios, amendment precedence, calculation integrity, reviewer controls, audit-chain stability, optional platform adapters, API authentication behavior, and the AG-UI route registration.
 
 ## AO usage during the hackathon
 
@@ -63,13 +92,14 @@ AO was used from the beginning to coordinate independent research and implementa
 
 ```text
 apps/web        Next.js control-room UI and server-side API proxy
-apps/api        FastAPI API plus typed covenant calculator and review policy
+apps/api        FastAPI, LangGraph, agent, platform adapters, and Python covenant core
 data            curated SEC/PDF/XLSX demonstration corpus
 docs            domain research, architecture, plans, and primary-source controls brief
 infra           optional LiteLLM proxy configuration
 references      read-only upstream integration/design references
+supabase        Postgres, RLS, Auth, and private Storage migration
 ```
 
 ## Production next steps
 
-The hackathon demo uses curated in-memory cases to make the workflow inspectable. Before handling customer data, implement authenticated intake, private document storage, versioned rule/fact persistence, approved reviewer roles, immutable audit storage, and agreement-specific PDF rendering. The architecture plan in `docs/` details this hardening path.
+The repository now includes authenticated Supabase persistence and private storage adapters, but the default demonstration data remains curated and in memory so every outcome is repeatable. Before handling real customer data, add an agreement-specific extraction pipeline, approved reviewer-role claims, immutable external audit retention, and final signed-PDF rendering. The architecture plan in `docs/` details this hardening path.

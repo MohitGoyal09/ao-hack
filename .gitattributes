@@ -1,0 +1,9 @@
+# Downloaded SEC filings and binary evidence are test data, not application source.
+data/raw/** linguist-vendored
+
+# Copied upstream UI examples are implementation references, not shipped product code.
+references/** linguist-vendored
+
+# Keep generated lockfiles and build artifacts out of language statistics.
+*.lock linguist-generated
+package-lock.json linguist-generated

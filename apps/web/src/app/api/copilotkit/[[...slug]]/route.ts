@@ -14,7 +14,7 @@ import { LangGraphHttpAgent } from "@copilotkit/runtime/langgraph";
 // config, v2 endpoint wiring, MCP apps, openGenerativeUI, a2ui — mirrors
 // the reference demo.
 const defaultAgent = new LangGraphHttpAgent({
-  url: `${process.env.AGENT_URL || "http://localhost:8123"}/`,
+  url: `${process.env.AGENT_URL || "http://localhost:8123"}/ag-ui`,
 });
 
 const runtime = new CopilotRuntime({
@@ -40,18 +40,6 @@ const runtime = new CopilotRuntime({
     : { runner: new InMemoryAgentRunner() }),
   // --- /copilotkit:intelligence ---
   openGenerativeUI: true,
-  a2ui: {
-    injectA2UITool: false,
-  },
-  mcpApps: {
-    servers: [
-      {
-        type: "http",
-        url: process.env.MCP_SERVER_URL || "https://mcp.excalidraw.com",
-        serverId: "example_mcp_app",
-      },
-    ],
-  },
 });
 
 const app = createCopilotEndpoint({

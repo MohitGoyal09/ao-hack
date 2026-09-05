@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { CopilotChat } from "@copilotkit/react-core/v2";
 import styles from "./page.module.css";
 
 type CaseSummary = { id: string; name: string; narrative: string; agreement: string; agreement_version: string; test_date: string; scenario_type: string };
@@ -40,7 +41,12 @@ export default function HomePage() {
   const run = useCallback(async (decision = "pending") => {
     setLoading(true); setError("");
     try {
-      const response = await fetch(`/api/covenant/cases/${selected}/run`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviewer_decision: decision, reviewer_name: "Treasury reviewer" }) });
+      const reviewerRationale = decision === "approve_addback"
+        ? "Management support reviewed and reconciled for the demo."
+        : decision === "reject_addback"
+          ? "Requested supporting evidence was not delivered."
+          : null;
+      const response = await fetch(`/api/covenant/cases/${selected}/run`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviewer_decision: decision, reviewer_name: decision === "pending" ? null : "Treasury reviewer", reviewer_rationale: reviewerRationale }) });
       if (!response.ok) throw new Error("The workflow could not be run.");
       setResult(await response.json());
     } catch (err) { setError(err instanceof Error ? err.message : "The workflow could not be run."); }
@@ -89,6 +95,10 @@ export default function HomePage() {
       </div>
       <article className={styles.trace}><p className={styles.cardKicker}>AUDITABLE WORKFLOW TRACE</p>{result.trace.map((event) => <div key={event.step}><span>{event.step}</span><strong>{event.label}</strong><p>{event.detail}</p></div>)}</article>
     </section> : <section className={styles.empty}><span>01 → 05</span><h2>Every verdict has a spine.</h2><p>Resolve the controlling agreement. Cite the term. Map the evidence. Calculate in code. Escalate what a system cannot safely decide.</p></section>}
-    <footer><span>Covenant Certificate</span><span>Drafting support only · Authorized officer approval required</span></footer>
+    <section className={styles.agentSection}>
+      <div className={styles.agentIntro}><p className={styles.eyebrow}>LANGGRAPH · AG-UI</p><h2>Ask the treasury copilot</h2><p>The agent can explain or run the curated cases, but every ratio and verdict still comes from the deterministic Python control layer.</p></div>
+      <div className={styles.agentChat}><CopilotChat labels={{ welcomeMessageText: "Ask me to list the cases, or run one using its case ID.", chatInputPlaceholder: "Ask about a covenant case..." }} /></div>
+    </section>
+    <footer className={styles.footer}><span>Covenant Certificate</span><span>Drafting support only · Authorized officer approval required</span></footer>
   </main>;
 }

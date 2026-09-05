@@ -27,6 +27,8 @@ services:
       SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
       SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-covenant-private}
       NEATLOGS_ENABLED: ${NEATLOGS_ENABLED:-false}
+      NEATLOGS_API_KEY: ${NEATLOGS_API_KEY:-}
+      NEATLOGS_ENDPOINT: ${NEATLOGS_ENDPOINT:-https://ingest.neatlogs.com}
       NEATLOGS_WORKFLOW_NAME: ${NEATLOGS_WORKFLOW_NAME:-covenant-certificate}
       PORT: 8123
     ports:
