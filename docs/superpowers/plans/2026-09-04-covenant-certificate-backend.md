@@ -6,7 +6,7 @@
 
 **Architecture:** One FastAPI service runs a bounded LangGraph workflow. LLM nodes propose legal interpretations and financial mappings. Deterministic services own precedence, completeness, arithmetic, state changes, approvals, and finalization. Supabase is the authoritative database, Auth, and private file store. Neatlogs receives redacted operational traces only.
 
-**Tech Stack:** Python 3.12, FastAPI, LangGraph, Pydantic 2, SQLAlchemy 2, psycopg 3, Alembic, Supabase, Docling, AG-UI, Neatlogs, pytest, Ruff, mypy.
+**Tech Stack:** Python 3.12, FastAPI, LangGraph, Pydantic 2, SQLAlchemy 2, psycopg 3, Alembic, Supabase, Docling, LiteLLM Proxy, AG-UI, Neatlogs, pytest, Ruff, mypy.
 
 **Spec:** `docs/covenant-certificate-backend-architecture.md`
 
@@ -18,6 +18,7 @@
 - The only analytical outcomes are `DRAFT_COMPLIANT`, `DRAFT_BREACH`, and `NEEDS_REVIEW`.
 - Only an authenticated officer can move a certificate to `FINALIZED`.
 - Models never perform final arithmetic or directly modify authoritative state.
+- Backend model calls use LiteLLM aliases only. Provider model IDs and keys stay in gateway configuration.
 - Every rule, fact, adjustment, and result needs source provenance.
 - Missing evidence never defaults to zero and never produces compliance.
 - Use `Decimal`, immutable source files, versioned artifacts, and private Storage.
@@ -51,6 +52,7 @@ apps/api/src/covenant_certificate/
 
 - [ ] Write failing tests for required production configuration and secret-safe representations.
 - [ ] Add and lock SQLAlchemy, psycopg, Alembic, Supabase, Docling, multipart upload, Postgres checkpointer, JWT, structlog, pytest, Ruff, and mypy dependencies.
+- [ ] Configure the OpenAI-compatible client against `LITELLM_BASE_URL` and test the `covenant-fast` and `covenant-strong` aliases.
 - [ ] Implement settings, structured API errors, liveness, and dependency-aware readiness.
 - [ ] Remove all sample business behavior while preserving the minimal AG-UI serving pattern.
 - [ ] Run focused tests, `ruff check`, and `mypy src`.
@@ -229,6 +231,12 @@ apps/api/src/covenant_certificate/
 **Produces:** JSON and Markdown reports for extraction, grounding, calculation, state, and abstention.
 
 - [ ] Add expert-reviewed cases for opposite agreement results, amendment threshold change, and unsupported add-back review.
+- [ ] Use Aon agreement plus 10-K/XLSX for maximum-leverage definitions, four-quarter periods, pro forma adjustments, threshold steps, and certificate-reference checks.
+- [ ] Use Disney agreement plus 10-K/XLSX as a held-out interest-coverage and rolling-four-quarter schema-transfer case.
+- [ ] Use Celanese second and third amendments for amendment ordering, covenant-relief, test-date, and threshold-table checks. Do not score a full verdict until the original agreement chain is present.
+- [ ] Use Citizens PDF and 10-Q/XLSX for parser and financial-mapping tests, but do not treat its legal labels as gold until its direct SEC agreement source is resolved.
+- [ ] Validate every raw file against `data/manifest.json` before a run and fail on checksum mismatch.
+- [ ] Store reviewed answer keys separately under `data/gold/`; never modify `data/raw/`.
 - [ ] Add negative cases for missed covenant, OCR decimal corruption, restricted cash, lease treatment, wrong period, and conflicting waiver.
 - [ ] Split evaluation by agreement, never by pages from the same agreement.
 - [ ] Measure covenant recall, rule-field accuracy, citation validity, calculation accuracy, status accuracy, amendment precedence, certificate completeness, and unsupported compliance.

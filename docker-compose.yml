@@ -1,4 +1,16 @@
 services:
+  litellm:
+    build:
+      context: ./infra/litellm
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      LITELLM_FAST_MODEL: ${LITELLM_FAST_MODEL:-openai/gpt-4.1-mini}
+      LITELLM_STRONG_MODEL: ${LITELLM_STRONG_MODEL:-anthropic/claude-sonnet-4-6}
+    ports:
+      - "4000:4000"
+
   api:
     build:
       context: ./apps/api
@@ -7,6 +19,10 @@ services:
       MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-}
+      LITELLM_BASE_URL: http://litellm:4000/v1
+      LITELLM_FAST_ALIAS: ${LITELLM_FAST_ALIAS:-covenant-fast}
+      LITELLM_STRONG_ALIAS: ${LITELLM_STRONG_ALIAS:-covenant-strong}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
       SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-covenant-private}
@@ -15,6 +31,8 @@ services:
       PORT: 8123
     ports:
       - "8123:8123"
+    depends_on:
+      - litellm
   web:
     build:
       context: ./apps/web

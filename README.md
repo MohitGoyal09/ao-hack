@@ -18,6 +18,7 @@ references      Read-only upstream design and integration references
 - Database: Supabase Postgres in all environments
 - Files: private Supabase Storage buckets
 - Agent transport: AG-UI through CopilotKit
+- Model gateway: self-hosted LiteLLM Proxy
 - Planned agent observability: Neatlogs
 
 ## Local development
@@ -39,9 +40,12 @@ The expected application endpoints are:
 - `apps/api`: Railway, Render, Fly.io, or any container host
 - Database, private files, and later authentication: Supabase
 - Agent traces, evaluations, and debugging: Neatlogs
+- Model aliases, provider routing, fallback, and budgets: LiteLLM
 
 The web application communicates with the API through the server-side CopilotKit route. Database credentials and secret keys must never be exposed through `NEXT_PUBLIC_` variables.
 
 The copied starter still uses in-memory agent state and demo data. The first backend implementation must replace those paths with Supabase Postgres persistence, private Supabase Storage, and verified Supabase Auth. Do not expose the raw agent endpoint publicly or enable CopilotKit Intelligence with its sample `demo-user` identity.
 
 Neatlogs instrumentation is planned but not installed. Supabase will remain the authoritative audit store; Neatlogs will hold operational traces only.
+
+The API calls only `covenant-fast` and `covenant-strong`. LiteLLM maps those aliases to provider models and owns provider credentials, retries, fallbacks, and spend controls.

@@ -666,6 +666,8 @@ Metrics:
 
 Use OpenTelemetry-compatible spans. Neatlogs can be added as the hackathon trace viewer if its integration is confirmed.
 
+LiteLLM Proxy is the only model gateway. Application code uses `covenant-fast` and `covenant-strong` aliases instead of provider model IDs.
+
 ## 18. Evaluation architecture
 
 ### Test layers

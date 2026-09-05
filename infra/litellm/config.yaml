@@ -1,0 +1,24 @@
+model_list:
+  - model_name: covenant-fast
+    litellm_params:
+      model: os.environ/LITELLM_FAST_MODEL
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: covenant-strong
+    litellm_params:
+      model: os.environ/LITELLM_STRONG_MODEL
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+router_settings:
+  routing_strategy: simple-shuffle
+  fallbacks:
+    - covenant-fast:
+        - covenant-strong
+  num_retries: 2
+  timeout: 90
+
+litellm_settings:
+  request_timeout: 90
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
