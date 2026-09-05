@@ -218,14 +218,37 @@ async def resolve_issue(issue_id: str, body: dict) -> dict:
 async def officer_approval(case_id: str, body: dict) -> dict:
     _ensure_revisions(case_id)
     try:
+        case = workflow._repository.get_case(case_id)  # noqa: SLF001
+    except UnknownCaseError as error:
+        raise HTTPException(status_code=404, detail="Unknown covenant case") from error
+    from src.covenant.calculator import CovenantCalculator
+    from src.covenant.domain import ReviewerDecision, money_str
+
+    revision_id = str(body.get("revision_id", ""))
+    try:
+        head = revision_store.get(case_id, revision_id)
+    except UnknownRevisionError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    rule = case.rule.model_copy(update={"threshold": float(head.threshold)})
+    calculation, _ = CovenantCalculator().calculate(case.model_copy(update={"rule": rule}), ReviewerDecision.PENDING)
+    fresh_inputs = {line.fact_key: money_str(line.amount) for line in calculation.lines if line.included}
+    try:
         binding = revision_store.approve(
             case_id=case_id,
-            revision_id=str(body.get("revision_id", "")),
+            revision_id=revision_id,
             package_hash=str(body.get("package_hash", "")),
             actor=str(body.get("actor", "officer")),
             role=str(body.get("role", "officer")),
             decision=body.get("decision", "approved"),
             reason=str(body.get("reason", "")),
+            approved_ratio=body.get("approved_ratio"),
+            approved_threshold=body.get("approved_threshold"),
+            approved_comparator=body.get("approved_comparator"),
+            approved_inputs=body.get("approved_inputs"),
+            fresh_ratio=None if calculation.ratio is None else money_str(calculation.ratio),
+            fresh_threshold=money_str(calculation.threshold),
+            fresh_comparator=calculation.comparator,
+            fresh_inputs=fresh_inputs,
         )
     except UnknownRevisionError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -233,7 +256,9 @@ async def officer_approval(case_id: str, body: dict) -> dict:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return binding.model_dump(mode="json")
+    payload = binding.model_dump(mode="json")
+    payload["locked_summary"] = binding.locked_summary()
+    return payload
 
 
 @app.get("/api/cases/{case_id}/snapshot")

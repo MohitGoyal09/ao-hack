@@ -65,6 +65,25 @@ class ApprovalBinding(BaseModel):
     timestamp: datetime
     superseding_approval_ref: str | None = None
     superseded: bool = False
+    # Exact approved numeric snapshot (money_str exact-string decimals, never floats).
+    approved_ratio: str | None = None
+    approved_threshold: str | None = None
+    approved_comparator: str | None = None
+    approved_inputs: dict[str, str] = Field(default_factory=dict)
+
+    def locked_summary(self) -> str:
+        """Human-readable lock statement for frontend / audit reports."""
+        bits = [
+            f"revision {self.target_revision}",
+            f"ratio {self.approved_ratio}" if self.approved_ratio is not None else "ratio n/a",
+            f"threshold {self.approved_comparator or '<='} {self.approved_threshold}"
+            if self.approved_threshold is not None
+            else "threshold n/a",
+        ]
+        if self.approved_inputs:
+            inputs = ", ".join(f"{k}={v}" for k, v in sorted(self.approved_inputs.items()))
+            bits.append(f"inputs {inputs}")
+        return f"this approval locked in: {'; '.join(bits)}"
 
 
 class ReviewIssueRecord(BaseModel):
@@ -337,6 +356,40 @@ class RevisionStore:
             )
             return response
 
+    @staticmethod
+    def _check_number_drift(
+        approved_ratio: str | None,
+        approved_threshold: str | None,
+        approved_comparator: str | None,
+        approved_inputs: dict[str, str] | None,
+        fresh_ratio: str | None,
+        fresh_threshold: str | None,
+        fresh_comparator: str | None,
+        fresh_inputs: dict[str, str] | None,
+    ) -> None:
+        """Reject when an officer-seen number differs from fresh recalculation.
+
+        Each mismatch names the specific number that drifted, e.g.
+        'threshold changed from 3.75 to 3.25'. Fields the caller did not
+        submit (None) are not compared; fresh values are authoritative.
+        """
+        if fresh_ratio is None:
+            return
+        if approved_ratio is not None and approved_ratio != fresh_ratio:
+            raise StaleCommandError(f"ratio changed from {approved_ratio} to {fresh_ratio}")
+        if approved_threshold is not None and approved_threshold != fresh_threshold:
+            raise StaleCommandError(
+                f"threshold changed from {approved_threshold} to {fresh_threshold}"
+            )
+        if approved_comparator is not None and approved_comparator != fresh_comparator:
+            raise StaleCommandError(
+                f"comparator changed from {approved_comparator} to {fresh_comparator}"
+            )
+        for key, seen in (approved_inputs or {}).items():
+            current = (fresh_inputs or {}).get(key)
+            if current is not None and seen != current:
+                raise StaleCommandError(f"input {key} changed from {seen} to {current}")
+
     # -- approvals ----------------------------------------------------------
     def approve(
         self,
@@ -347,6 +400,14 @@ class RevisionStore:
         role: str,
         decision: Literal["approved", "rejected"],
         reason: str,
+        approved_ratio: str | None = None,
+        approved_threshold: str | None = None,
+        approved_comparator: str | None = None,
+        approved_inputs: dict[str, str] | None = None,
+        fresh_ratio: str | None = None,
+        fresh_threshold: str | None = None,
+        fresh_comparator: str | None = None,
+        fresh_inputs: dict[str, str] | None = None,
     ) -> ApprovalBinding:
         with self._lock:
             head = self.current(case_id)
@@ -354,6 +415,16 @@ class RevisionStore:
                 raise StaleCommandError("approval targets a superseded revision")
             if package_hash != head.package_hash:
                 raise StaleCommandError("package hash no longer matches current state")
+            # A superseded approval can never re-authorize a later revision:
+            # any binding already marked superseded stays unusable, and every
+            # approval must target the exact current head above.
+            for prior_binding in self._approvals.get(case_id, []):
+                if prior_binding.superseded and prior_binding.target_revision == revision_id:
+                    raise StaleCommandError("approval targets a superseded revision")
+            self._check_number_drift(
+                approved_ratio, approved_threshold, approved_comparator, approved_inputs,
+                fresh_ratio, fresh_threshold, fresh_comparator, fresh_inputs,
+            )
             blocking = [
                 i for i in self._issues.values()
                 if i.case_id == case_id and i.revision_id == revision_id and i.status == "open"
@@ -373,6 +444,10 @@ class RevisionStore:
                 decision=decision,
                 reason=reason,
                 timestamp=_now(),
+                approved_ratio=fresh_ratio if fresh_ratio is not None else approved_ratio,
+                approved_threshold=fresh_threshold if fresh_threshold is not None else approved_threshold,
+                approved_comparator=fresh_comparator if fresh_comparator is not None else approved_comparator,
+                approved_inputs=dict(fresh_inputs) if fresh_inputs is not None else dict(approved_inputs or {}),
             )
             if prior:
                 binding.superseding_approval_ref = f"{case_id}:{prior[-1].target_revision}:{prior[-1].actor}"
