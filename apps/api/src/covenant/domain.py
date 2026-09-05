@@ -8,10 +8,25 @@ the backend, not a label added by the frontend.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
+
+
+TWO_PLACES = Decimal("0.01")
+
+
+def money_str(value: float | int) -> str:
+    """Render a financial value as an exact two-decimal string.
+
+    The internal pipeline stores money as floats already rounded to two places
+    (see calculator.py).  JSON per the implementation contract carries these as
+    exact decimal strings, never binary floats, so a borrower can rely on the
+    wire value matching the ledger exactly.
+    """
+    return str(Decimal(str(value)).quantize(TWO_PLACES, rounding=ROUND_HALF_UP))
 
 
 class DraftStatus(StrEnum):
@@ -55,6 +70,10 @@ class FinancialFact(BaseModel):
     supported: bool = True
     requires_review: bool = False
 
+    @field_serializer("amount")
+    def _serialize_amount(self, value: float, _info) -> str:
+        return money_str(value)
+
 
 class CovenantRule(BaseModel):
     id: str
@@ -69,6 +88,14 @@ class CovenantRule(BaseModel):
     citations: list[Citation]
     active: bool = True
     original_threshold: float | None = None
+
+    @field_serializer("threshold")
+    def _serialize_threshold(self, value: float, _info) -> str:
+        return money_str(value)
+
+    @field_serializer("original_threshold")
+    def _serialize_original_threshold(self, value: float | None, _info) -> str | None:
+        return None if value is None else money_str(value)
 
 
 class CovenantCase(BaseModel):
@@ -100,6 +127,10 @@ class CalculationLine(BaseModel):
     included: bool
     reason: str
 
+    @field_serializer("amount")
+    def _serialize_amount(self, value: float, _info) -> str:
+        return money_str(value)
+
 
 class CalculationResult(BaseModel):
     formula: str
@@ -113,6 +144,18 @@ class CalculationResult(BaseModel):
     original_threshold: float | None = None
     passed: bool | None
     lines: list[CalculationLine]
+
+    @field_serializer("numerator", "denominator", "threshold", "headroom")
+    def _serialize_money(self, value: float | None, _info) -> str | None:
+        return None if value is None else money_str(value)
+
+    @field_serializer("ratio")
+    def _serialize_ratio(self, value: float | None, _info) -> str | None:
+        return None if value is None else money_str(value)
+
+    @field_serializer("original_threshold")
+    def _serialize_original_threshold(self, value: float | None, _info) -> str | None:
+        return None if value is None else money_str(value)
 
 
 class ReviewIssue(BaseModel):
@@ -155,6 +198,14 @@ class DraftCertificate(BaseModel):
     evidence_manifest_hash: str
     finalization_allowed: bool
     generated_at: datetime
+
+    @field_serializer("ratio")
+    def _serialize_ratio(self, value: float | None, _info) -> str | None:
+        return None if value is None else money_str(value)
+
+    @field_serializer("threshold")
+    def _serialize_threshold(self, value: float, _info) -> str:
+        return money_str(value)
 
 
 class WorkflowResult(BaseModel):
