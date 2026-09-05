@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Approval, CaseSummary, RunResult, Snapshot } from "@/lib/api";
 import styles from "@/app/page.module.css";
 
@@ -26,5 +27,6 @@ export function DownloadPackage({ info, snapshot, result, approval }: { info: Ca
     <span className={`${styles.chip} ${current ? styles.chipGood : styles.chipWarn}`}>{current ? `approved by ${current.actor}` : "unapproved draft"}</span>
     <button type="button" onClick={download} disabled={blocked} aria-describedby="download-why">Download draft package</button>
     <span id="download-why" className={styles.muted}>{blocked ? `Disabled: ${snapshot.open_review_issues} open review issue(s) — resolve them first.` : result ? "Includes the calculation from the last recalculation." : "No calculation yet — package will carry revision, hashes and approvals only."}</span>
+    <Link href={`/cases/${snapshot.case_id}/workpaper`} className={styles.muted}>Open printable workpaper (DRAFT — not a signed certificate) →</Link>
   </article>;
 }

@@ -1,0 +1,68 @@
+/* Printable draft workpaper. Screen: paper sheet on the site background. Print: A4, black text, repeated watermark. */
+.page { min-height: 100vh; background: #e9eae4; padding: 24px 12px 48px; color: #1f2824; font-size: 13px; line-height: 1.5; }
+.nav { max-width: 860px; margin: 0 auto 12px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.nav a { color: #285e4e; font-weight: 600; text-decoration: none; }
+.nav a:hover { text-decoration: underline; }
+.print { border: 0; background: #285e4e; color: #fff; padding: 10px 16px; font-weight: 600; font-size: 13px; cursor: pointer; }
+.print:hover { background: #173c33; }
+.sheet { position: relative; max-width: 860px; margin: 0 auto; background: #fff; border: 1px solid #d6dad2; padding: 40px 48px 32px; box-shadow: 0 2px 12px rgba(0, 0, 0, .06); overflow: hidden; }
+.banner { background: #8a2f26; color: #fff; text-align: center; font-family: "DM Mono", monospace; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; padding: 10px 12px; font-size: 14px; margin: -40px -48px 28px; }
+.watermark { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; font-family: "DM Mono", monospace; font-weight: 700; font-size: clamp(28px, 5.5vw, 64px); text-transform: uppercase; letter-spacing: .08em; text-align: center; color: #8a2f26; opacity: .07; transform: rotate(-28deg); }
+.sheet > :not(.watermark) { position: relative; z-index: 1; }
+.head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; border-bottom: 2px solid #1f2824; padding-bottom: 14px; margin-bottom: 20px; }
+.head h1 { font-family: "Playfair Display", Georgia, serif; font-size: 26px; line-height: 1.15; margin: 0 0 6px; letter-spacing: -.5px; }
+.eyebrow { font-family: "DM Mono", monospace; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #56675b; margin: 0 0 6px; }
+.states { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; text-align: right; }
+.section { margin: 0 0 22px; }
+.section h2 { font-family: "Playfair Display", Georgia, serif; font-size: 17px; margin: 0 0 8px; padding-bottom: 4px; border-bottom: 1px solid #d6dad2; }
+.section h2 small { font-family: "DM Mono", monospace; font-size: 11px; font-weight: 400; color: #56675b; margin-left: 8px; letter-spacing: .04em; }
+.kv { display: grid; grid-template-columns: minmax(150px, auto) 1fr; gap: 3px 16px; margin: 0; }
+.kv dt { color: #56675b; font-family: "DM Mono", monospace; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding-top: 2px; }
+.kv dd { margin: 0; min-width: 0; word-break: break-word; }
+.table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.table th, .table td { border: 1px solid #d6dad2; padding: 5px 8px; text-align: left; vertical-align: top; overflow-wrap: break-word; }
+.table th { white-space: nowrap; background: #f1f2ee; color: #56675b; font-family: "DM Mono", monospace; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; font-weight: 500; }
+.table td.num { text-align: right; font-family: "DM Mono", monospace; white-space: nowrap; }
+.tableWrap { overflow-x: auto; }
+.mono { font-family: "DM Mono", monospace; font-size: 11px; word-break: break-all; }
+.chip { display: inline-block; font-family: "DM Mono", monospace; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 3px 8px; border: 1px solid; white-space: nowrap; }
+.chipGood { background: #e1efe4; color: #1d643f; border-color: #458658; }
+.chipWarn { background: #f4edcf; color: #79611d; border-color: #b59b39; }
+.chipBad { background: #f5e2df; color: #973b33; border-color: #b34f46; }
+.chipNeutral { background: #ebece6; color: #3f4a44; border-color: #c4ccc5; }
+.stamp { display: inline-block; font-family: "DM Mono", monospace; font-weight: 700; font-size: 12px; letter-spacing: .12em; color: #973b33; border: 2px solid #973b33; padding: 2px 8px; transform: rotate(-4deg); }
+.calc { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0; }
+.calc div { border: 1px solid #d6dad2; padding: 8px 10px; }
+.calc small { display: block; color: #56675b; font-family: "DM Mono", monospace; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.calc strong { font-family: "DM Mono", monospace; font-size: 18px; font-weight: 500; }
+.formula { font-family: "DM Mono", monospace; font-size: 12px; background: #f1f2ee; padding: 8px 10px; margin: 0 0 6px; }
+.warn { background: #f4edcf; border-left: 4px solid #b59b39; color: #5a4712; padding: 8px 12px; margin: 8px 0; }
+.note { background: #f5e2df; border-left: 4px solid #b34f46; color: #6d2a24; padding: 8px 12px; margin: 8px 0; }
+.muted { color: #59665e; font-size: 12px; margin: 4px 0; }
+.list { margin: 6px 0; padding-left: 20px; }
+.list li { margin: 4px 0; }
+.approval { border: 1px solid #d6dad2; padding: 10px 12px; margin: 8px 0; display: flex; flex-direction: column; gap: 4px; }
+.approvalHead { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.footer { border-top: 2px solid #1f2824; margin-top: 24px; padding-top: 10px; font-size: 11px; color: #56675b; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.state { max-width: 860px; margin: 40px auto; background: #fff; border: 1px solid #d6dad2; padding: 24px; }
+.state h1 { font-family: "Playfair Display", Georgia, serif; font-size: 20px; margin: 0 0 8px; }
+.error { color: #973b33; font-weight: 600; margin: 0; }
+@media (max-width: 620px) { .sheet { padding: 24px 16px; } .banner { margin: -24px -16px 20px; } .kv { grid-template-columns: 1fr; } }
+
+@media print {
+  @page { size: A4; margin: 16mm 14mm; }
+  .page { background: #fff; padding: 0; color: #000; font-size: 11pt; }
+  .noPrint { display: none !important; }
+  .sheet { max-width: none; border: 0; box-shadow: none; padding: 0; overflow: visible; }
+  .banner { margin: 0 0 16pt; background: #000; color: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .watermark { display: flex; opacity: .13; color: #000; }
+  .table tr, .approval, .calc div, .kv, .list li { break-inside: avoid; page-break-inside: avoid; }
+  .section h2 { break-after: avoid; page-break-after: avoid; }
+  .states { flex-direction: row; align-items: center; }
+  .table thead { display: table-header-group; }
+  .table th, .table td, .kv dt, .kv dd, .muted, .eyebrow, .footer, .section h2 small, .calc small { color: #000; }
+  .table th, .formula { background: #eee; }
+  .chip, .stamp, .warn, .note { color: #000; border-color: #000; background: #fff; }
+  .warn, .note { border-left-width: 3pt; }
+  .sheet a { color: #000; text-decoration: none; }
+}
