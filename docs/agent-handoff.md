@@ -387,6 +387,27 @@ Owner: worker entry point, queue calls, orchestrator, case repository, recovery.
 Done when: upload-to-worker-to-snapshot works on Supabase; restart recovers; an
 old worker cannot publish; old approvals cannot authorize a new revision.
 
+Implementation update (2026-09-06, commit pending):
+
+- New `src/platform/worker.py`: `Worker.run_once` (lease → begin → run with
+  fencing-token heartbeats → re-get before publish → complete/fail), stale
+  publish impossible, cancelled jobs dropped, transient errors retry and
+  permanent errors cancel, plus `run_forever` and a `main()` entry point.
+- New `src/covenant/pipeline.py`: `CasePipeline` builds from persisted
+  documents, persists covenant rules, financial facts (Decimal-exact),
+  calculation/coverage/evidence/trace/package artifacts with stale rotation,
+  drives `run_state`, and emits id-only domain events. Unsupported content
+  waits for review with no invented figures.
+- `GET /api/cases/{case_id}/jobs` and `POST /api/jobs/{job_id}/cancel`
+  (401/404, idempotent cancel, capped listing, no secret exposure).
+- End-to-end proven on local Supabase: upload → enqueue → worker run →
+  snapshot shows worker artifacts and events.
+- Backend suite: 123 tests, 110 pass + 13 skipped offline; 122 pass +
+  1 skipped with integration DB. Frontend build passes. Local lint clean.
+- Limits: worker runs on demand (no deployed always-on process yet);
+  extraction beyond the Aon shape stays `unsupported`; snapshot UI does not
+  yet surface worker artifacts (Phase 7).
+
 ### Phase 5 — Complete tools and durable human review
 
 Owner: `agent.py`, LangGraph state, tool schemas, LiteLLM/Gemini tests.

@@ -810,6 +810,91 @@ async def get_document(
     }
 
 
+# --- Job list/cancel routes (additive; existing routes/helpers untouched). ---
+
+_TERMINAL_JOB_STATES = frozenset({"completed", "failed", "cancelled"})
+
+
+def _serialize_job_summary(job: Any) -> dict:
+    """Public job summary; never leaks payload bytes or auth secrets."""
+    return {
+        "job_id": job.id,
+        "revision_id": job.revision_id,
+        "state": job.state,
+        "attempt_count": job.attempt_count,
+        "fencing_token": job.fencing_token,
+        "lease_owner": job.lease_owner,
+        "last_error": job.last_error,
+    }
+
+
+def _jobs_for_case(job_store: Any, case_id: str) -> list[Any]:
+    """Newest-first jobs for one case, capped at 50. Read-only."""
+    try:
+        from src.platform.jobqueue import PostgresJobStore
+    except Exception:
+        PostgresJobStore = None  # type: ignore[assignment]
+    if PostgresJobStore is not None and isinstance(job_store, PostgresJobStore):
+        with job_store._conn().cursor() as cur:  # noqa: SLF001
+            cur.execute(
+                f"select {job_store._COLS} from public.revision_run_jobs"  # noqa: SLF001
+                " where case_id = %s order by created_at desc limit 50",
+                (case_id,),
+            )
+            return [job_store._row_to_job(row) for row in cur.fetchall()]  # noqa: SLF001
+    with job_store._lock:  # noqa: SLF001
+        jobs = [j for j in list(job_store._jobs.values())  # noqa: SLF001
+                if j.case_id == case_id]
+    # MemoryJobStore carries no timestamps; dict insertion order is
+    # oldest-first, so reversed order is newest-first.
+    jobs.reverse()
+    return jobs[:50]
+
+
+@app.get("/api/cases/{case_id}/jobs")
+async def list_case_jobs(
+    case_id: str,
+    request: Request,
+    principal: Principal = Depends(require_revision_principal),
+) -> list[dict]:
+    authorization = request.headers.get("authorization")
+    _ensure_revisions(case_id, principal, authorization)
+    _require_case_member(case_id, principal, authorization)
+    job_store = request.app.state.durability_runtime.job_store
+    return [_serialize_job_summary(job) for job in _jobs_for_case(job_store, case_id)]
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(
+    job_id: str,
+    request: Request,
+    principal: Principal = Depends(require_revision_principal),
+) -> dict:
+    repo = _active_revision_repository()
+    authorization = request.headers.get("authorization")
+    job_store = request.app.state.durability_runtime.job_store
+    job = job_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job")
+    try:
+        org_id = repo.get_case_org(job.case_id)
+    except UnknownRevisionError as error:
+        raise HTTPException(status_code=404, detail="Unknown job") from error
+    role = _offline_member_role(repo, org_id, principal, authorization)
+    if role is None:
+        raise HTTPException(status_code=404, detail="Unknown job")
+    # Cancellation is an explicit operator command, so any member role may
+    # cancel; terminal jobs report their current state idempotently instead
+    # of being transitioned (cancel must never revive a completed job).
+    if job.state in _TERMINAL_JOB_STATES:
+        return {"job_id": job.id, "state": job.state}
+    try:
+        cancelled = job_store.cancel(job_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="Unknown job") from error
+    return {"job_id": cancelled.id, "state": cancelled.state}
+
+
 if agent_graph is not None:
     add_langgraph_fastapi_endpoint(
         app=app,
