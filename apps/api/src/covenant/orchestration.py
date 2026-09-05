@@ -15,7 +15,9 @@ from .calculator import CovenantCalculator
 from .certificate import CertificateRenderer
 from .domain import (
     CalculationResult,
+    CovenantAssessment,
     CovenantCase,
+    CoverageReport,
     DraftCertificate,
     DraftStatus,
     EvidenceItem,
@@ -43,6 +45,8 @@ class WorkflowState(TypedDict):
     audit: NotRequired[AuditTrail]
     calculation: NotRequired[CalculationResult]
     calculation_issues: NotRequired[list[ReviewIssue]]
+    assessments: NotRequired[list]
+    coverage: NotRequired[CoverageReport]
     status: NotRequired[DraftStatus]
     status_reason: NotRequired[str]
     review_issues: NotRequired[list[ReviewIssue]]
@@ -167,18 +171,33 @@ class CovenantOrchestrator:
         calculation, issues = self._calculator.calculate(
             state["case"], state["command"].reviewer_decision
         )
+        assessments, coverage, full_issues = self._calculator.evaluate_all(
+            state["case"], state["command"].reviewer_decision
+        )
         ratio_text = (
             f"{calculation.ratio:.2f}x vs {calculation.threshold:.2f}x"
             if calculation.ratio is not None
             else "No decisionable ratio"
         )
         state["audit"].record("Calculated deterministically", ratio_text, calculation)
-        return {"calculation": calculation, "calculation_issues": issues}
+        state["audit"].record(
+            "Evaluated full covenant checklist",
+            f"{len(assessments)} obligation(s); coverage {coverage.status.value}",
+            coverage,
+        )
+        return {
+            "calculation": calculation,
+            "calculation_issues": issues + full_issues,
+            "assessments": assessments,
+            "coverage": coverage,
+        }
 
     def _apply_policy(self, state: WorkflowState) -> dict:
-        status, reason, issues = self._policy.assess(
+        status, reason, issues = self._policy.assess_full(
             state["case"],
             state["calculation"],
+            state.get("assessments", []),
+            state["coverage"],
             state["command"],
             state["calculation_issues"],
         )
@@ -251,6 +270,8 @@ class CovenantOrchestrator:
             review_issues=state["review_issues"],
             trace=state["audit"].events(),
             certificate=state["certificate"],
+            covenant_results=state.get("assessments", []),
+            coverage=state.get("coverage"),
         )
         self._repository.save_run(result)
         return {"result": result}

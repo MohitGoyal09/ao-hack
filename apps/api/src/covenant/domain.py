@@ -41,6 +41,40 @@ class ReviewerDecision(StrEnum):
     REJECT_ADDBACK = "reject_addback"
 
 
+class CovenantResultStatus(StrEnum):
+    PASS = "pass"
+    FAIL = "fail"
+    INDETERMINATE = "indeterminate"
+    NOT_APPLICABLE = "not_applicable"
+    UNSUPPORTED = "unsupported"
+
+
+class CoverageStatus(StrEnum):
+    COMPLETE = "complete_for_declared_scope"
+    INCOMPLETE = "incomplete"
+
+
+class CovenantAssessment(BaseModel):
+    rule_id: str
+    rule_name: str
+    status: CovenantResultStatus
+    detail: str
+    ratio: float | None = None
+    threshold: float | None = None
+    passed: bool | None = None
+
+    @field_serializer("ratio", "threshold")
+    def _serialize_optional_money(self, value: float | None, _info) -> str | None:
+        return None if value is None else money_str(value)
+
+
+class CoverageReport(BaseModel):
+    status: CoverageStatus
+    assessed: list[str] = Field(default_factory=list)
+    excluded: list[str] = Field(default_factory=list)
+    note: str = ""
+
+
 class Citation(BaseModel):
     document_id: str
     document: str
@@ -88,6 +122,8 @@ class CovenantRule(BaseModel):
     citations: list[Citation]
     active: bool = True
     original_threshold: float | None = None
+    supported: bool = True
+    unsupported_reason: str | None = None
 
     @field_serializer("threshold")
     def _serialize_threshold(self, value: float, _info) -> str:
@@ -111,6 +147,11 @@ class CovenantCase(BaseModel):
     facts: list[FinancialFact]
     amendment_note: str | None = None
     risk_note: str | None = None
+    extra_rules: list[CovenantRule] = Field(default_factory=list)
+    unsupported_obligations: list[str] = Field(default_factory=list)
+
+    def all_rules(self) -> list[CovenantRule]:
+        return [self.rule, *self.extra_rules]
 
 
 class RunRequest(BaseModel):
@@ -220,4 +261,6 @@ class WorkflowResult(BaseModel):
     review_issues: list[ReviewIssue]
     trace: list[AuditEvent]
     certificate: DraftCertificate
+    covenant_results: list[CovenantAssessment] = Field(default_factory=list)
+    coverage: CoverageReport | None = None
 

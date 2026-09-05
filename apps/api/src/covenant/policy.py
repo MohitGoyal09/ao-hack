@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from .domain import (
     CalculationResult,
+    CovenantAssessment,
     CovenantCase,
+    CovenantResultStatus,
+    CoverageReport,
+    CoverageStatus,
     DraftStatus,
     ReviewerDecision,
     ReviewIssue,
@@ -110,7 +114,7 @@ class ReviewPolicy:
         if calculation.passed is True:
             return (
                 DraftStatus.COMPLIANT,
-                "Complete listed evidence and deterministic arithmetic satisfy the controlling threshold.",
+                "Declared supported scope passes deterministic arithmetic; not full agreement compliance.",
                 issues,
             )
         if calculation.passed is False:
@@ -124,3 +128,53 @@ class ReviewPolicy:
             "The calculation did not produce a decisionable ratio.",
             issues,
         )
+
+    def assess_full(
+        self,
+        case: CovenantCase,
+        calculation: CalculationResult,
+        assessments: list[CovenantAssessment],
+        coverage: CoverageReport,
+        command: RunRequest,
+        calculation_issues: list[ReviewIssue],
+    ) -> tuple[DraftStatus, str, list[ReviewIssue]]:
+        """Fail-closed verdict over the full rule checklist.
+
+        Preserve computed failures even if another covenant is indeterminate;
+        an empty evaluated set can never pass.
+        """
+        status, reason, issues = self.assess(case, calculation, command, calculation_issues)
+        if any(a.status == CovenantResultStatus.FAIL for a in assessments):
+            if status != DraftStatus.BREACH:
+                # A supported-rule failure survives indeterminate siblings,
+                # but evidence/policy blockers still hold the draft in review.
+                if any(i.severity == "blocking" for i in issues):
+                    return DraftStatus.REVIEW, (
+                        "A supported covenant fails on deterministic arithmetic, "
+                        "but blocking evidence/policy issues require review first: "
+                        + reason
+                    ), issues
+                failed = [a for a in assessments if a.status == CovenantResultStatus.FAIL]
+                return DraftStatus.BREACH, (
+                    "Complete listed evidence and deterministic arithmetic fail "
+                    f"the controlling threshold ({failed[0].detail})."
+                ), issues
+            return status, reason, issues
+        evaluated = [
+            a for a in assessments
+            if a.status in (CovenantResultStatus.PASS, CovenantResultStatus.FAIL)
+        ]
+        if not evaluated:
+            issues = list(issues) + [ReviewIssue(
+                code="NO_EVALUATED_COVENANTS",
+                severity="blocking",
+                message="Empty set of evaluated covenants cannot pass.",
+            )]
+            return DraftStatus.REVIEW, "Empty set of evaluated covenants cannot pass.", issues
+        if any(a.status == CovenantResultStatus.INDETERMINATE for a in assessments):
+            return DraftStatus.REVIEW, (
+                reason + " Coverage: " + coverage.note
+            ), issues
+        if coverage.status == CoverageStatus.INCOMPLETE and status == DraftStatus.COMPLIANT:
+            reason = reason + " Coverage: " + coverage.note
+        return status, reason, issues
