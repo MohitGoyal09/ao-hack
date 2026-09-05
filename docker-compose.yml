@@ -5,6 +5,7 @@ services:
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      NVIDIA_NIM_API_KEY: ${NVIDIA_NIM_API_KEY:-}
       LITELLM_FAST_MODEL: ${LITELLM_FAST_MODEL:-gemini/gemini-2.5-flash}
       LITELLM_STRONG_MODEL: ${LITELLM_STRONG_MODEL:-gemini/gemini-2.5-pro}
     ports:

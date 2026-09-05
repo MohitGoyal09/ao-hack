@@ -7,6 +7,18 @@ model_list:
     litellm_params:
       model: os.environ/LITELLM_STRONG_MODEL
       api_key: os.environ/GEMINI_API_KEY
+  # Optional NVIDIA NIM route (LiteLLM provider prefix nvidia_nim/). Both aliases
+  # point at nemotron-3-super-120b-a12b: the only fast, reliable tool caller measured
+  # on the free tier (agent-docs/build-e-model.md). Needs NVIDIA_NIM_API_KEY in the
+  # litellm container; select with LITELLM_*_ALIAS=nvidia-strong / nvidia-fast.
+  - model_name: nvidia-strong
+    litellm_params:
+      model: nvidia_nim/nvidia/nemotron-3-super-120b-a12b
+      api_key: os.environ/NVIDIA_NIM_API_KEY
+  - model_name: nvidia-fast
+    litellm_params:
+      model: nvidia_nim/nvidia/nemotron-3-super-120b-a12b
+      api_key: os.environ/NVIDIA_NIM_API_KEY
 
 router_settings:
   routing_strategy: simple-shuffle
