@@ -18,10 +18,12 @@ observer.initialize()
 
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from copilotkit import LangGraphAGUIAgent
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from src.agent import build_agent_graph
+from src.platform.jobqueue import DurabilityRuntime, DurabilityStatus, build_durability_runtime
 from src.covenant import RunRequest, UnknownCaseError, build_demo_workflow
 from src.covenant.revisions import (
     IdempotencyConflictError,
@@ -38,7 +40,12 @@ from src.platform.supabase import (
 
 workflow = build_demo_workflow()
 platform = SupabasePlatform.from_env()
-agent_graph = build_agent_graph(workflow)
+default_durability_runtime = build_durability_runtime()
+agent_graph = (
+    build_agent_graph(workflow, checkpointer=default_durability_runtime.checkpointer)
+    if default_durability_runtime.status.ready
+    else None
+)
 
 
 def _ensure_revisions(case_id: str) -> None:
@@ -57,8 +64,11 @@ def _ensure_revisions(case_id: str) -> None:
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(app: FastAPI):
     yield
+    runtime = getattr(app.state, "durability_runtime", None)
+    if runtime is not None:
+        runtime.close()
     observer.shutdown()
 
 
@@ -68,6 +78,8 @@ app = FastAPI(
     description="Evidence-first covenant workflow with LangGraph and AG-UI.",
     lifespan=lifespan,
 )
+app.state.durability_runtime = default_durability_runtime
+app.state.durability_status = default_durability_runtime.status
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -87,7 +99,7 @@ async def current_principal(
 
 
 @app.get("/health")
-async def health() -> dict:
+async def health(request: Request) -> dict:
     return {
         "status": "ok",
         "service": "covenant-certificate",
@@ -95,7 +107,47 @@ async def health() -> dict:
         "supabase": "configured" if platform.enabled else "offline-demo",
         "neatlogs": "configured" if observer.enabled else "disabled",
         "agent_transport": "ag-ui",
+        "durability": request.app.state.durability_status.public_dict(),
     }
+
+
+@app.get("/health/live")
+async def liveness() -> dict:
+    """Process liveness; it remains available during dependency outages."""
+    return {"status": "live", "service": "covenant-certificate"}
+
+
+@app.get("/health/ready")
+async def readiness(request: Request):
+    """Readiness distinguishes intentional offline demo mode from an outage."""
+    status: DurabilityStatus = request.app.state.durability_status
+    if not status.ready:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unready",
+                "durability": status.public_dict(),
+            },
+        )
+    if status.degraded:
+        return {
+            "status": "ready",
+            "durability": {**status.public_dict(), "mode": "offline-memory", "status": "degraded"},
+        }
+    return {"status": "ready", "durability": {**status.public_dict(), "mode": "postgres", "status": "ready"}}
+
+
+@app.middleware("http")
+async def reject_business_traffic_when_unready(request, call_next):
+    if not request.app.state.durability_status.ready and request.url.path not in {
+        "/health",
+        "/health/live",
+        "/health/ready",
+    }:
+        return JSONResponse(
+            status_code=503, content={"detail": "Service durability is unavailable"}
+        )
+    return await call_next(request)
 
 
 @app.get("/api/demo-cases")
@@ -270,12 +322,47 @@ async def case_snapshot(case_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
-add_langgraph_fastapi_endpoint(
-    app=app,
-    agent=LangGraphAGUIAgent(
-        name="covenant_agent",
-        description="Evidence-grounded treasury copilot for covenant review.",
-        graph=agent_graph,
-    ),
-    path="/ag-ui",
-)
+if agent_graph is not None:
+    add_langgraph_fastapi_endpoint(
+        app=app,
+        agent=LangGraphAGUIAgent(
+            name="covenant_agent",
+            description="Evidence-grounded treasury copilot for covenant review.",
+            graph=agent_graph,
+        ),
+        path="/ag-ui",
+    )
+
+
+def create_app(
+    *,
+    durability_status: DurabilityStatus | None = None,
+    durability_runtime: DurabilityRuntime | None = None,
+) -> FastAPI:
+    """Create an HTTP app with an injected public durability seam for tests.
+
+    Production uses the module's application-owned runtime. Test callers can
+    provide a typed status without changing module globals or touching a real
+    database.
+    """
+    if durability_status is None and durability_runtime is None:
+        return app
+    injected_status = durability_status or durability_runtime.status
+    created = FastAPI(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        lifespan=lifespan,
+    )
+    created.state.durability_status = injected_status
+    created.state.durability_runtime = durability_runtime
+    created.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST"],
+        allow_headers=["authorization", "content-type"],
+    )
+    created.middleware("http")(reject_business_traffic_when_unready)
+    created.router.routes.extend(app.router.routes)
+    return created

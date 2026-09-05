@@ -10,6 +10,7 @@ dependencies = [
   "langchain-openai==1.1.9",
   "langchain-anthropic==1.4.1",
   "langgraph==1.1.6",
+  "langgraph-checkpoint-postgres==3.1.2",
   "langsmith==0.7.33",
   "openai==1.109.1",
   "fastapi>=0.115.5,<1.0.0",
@@ -21,4 +22,5 @@ dependencies = [
   "neatlogs[langgraph]==1.4.20",
   "supabase==2.31.0",
   "pdfplumber>=0.11.10",
+  "psycopg[binary]==3.3.5",
 ]

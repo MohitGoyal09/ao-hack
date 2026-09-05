@@ -269,6 +269,21 @@ Owner: `apps/api/pyproject.toml`, `apps/api/src/platform/`, migrations, tests.
 Done when: bad configured DB fails readiness, offline mode is explicit, and real
 Postgres queue state survives process restart.
 
+Implementation update (2026-09-05, pending phase commit):
+
+- Added exact runtime dependencies for psycopg and the LangGraph Postgres checkpointer.
+- Configured queue/checkpoint failures now produce separate redacted readiness
+  failures and never downgrade to memory; memory mode is explicit only without a DB URL.
+- Added `/health/live` and `/health/ready`; unready durability blocks business traffic.
+- Checkpoint schema setup is no longer performed by app startup. Operators must
+  provision it explicitly in the intended environment.
+- Added an opt-in `TEST_DATABASE_URL` integration test for queue/checkpoint
+  reconstruction. Local verification ran 47 tests with 46 passing and this live
+  database test skipped because Docker/Podman and a safe test database were absent.
+- Frontend production build passed after pinning Turbopack to `apps/web`.
+- Remaining Phase 1 gate: run the opt-in test against an isolated, pre-provisioned
+  Postgres database. Do not use or reset the shared Supabase project for this proof.
+
 ### Phase 2 — Persist revisions and enforce authority
 
 Owner: revision repository, API auth, new forward migration, integration tests.

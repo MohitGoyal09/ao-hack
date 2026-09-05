@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import MagicMock, patch
 
-from src.agent import JOB_STORE, build_agent_graph
+from src.agent import build_agent_graph
 from src.covenant import build_demo_workflow
 from src.platform.jobqueue import (
+    DurabilityConfigurationError,
     JobConflictError,
     MemoryJobStore,
     StaleLeaseError,
+    build_durability_runtime,
     durable_checkpointer,
     job_store_from_env,
 )
@@ -71,18 +74,50 @@ class JobQueueTest(unittest.TestCase):
         self.assertEqual(cancelled.state, "cancelled")
 
     def test_offline_fallback_without_database_url(self):
-        import os
-        os.environ.pop("DATABASE_URL", None)
-        os.environ.pop("SUPABASE_DB_URL", None)
-        store = job_store_from_env()
+        with patch.dict("os.environ", {}, clear=True):
+            store = job_store_from_env()
         self.assertIsInstance(store, MemoryJobStore)
 
+    def test_configured_database_failure_never_downgrades_to_memory(self):
+        with patch.dict("os.environ", {"DATABASE_URL": "postgresql://unavailable"}, clear=True):
+            with patch("src.platform.jobqueue.PostgresJobStore", side_effect=OSError("offline")):
+                with self.assertRaises(DurabilityConfigurationError):
+                    job_store_from_env()
+
+    def test_configured_checkpoint_failure_never_downgrades_to_memory(self):
+        with patch.dict("os.environ", {"DATABASE_URL": "postgresql://unavailable"}, clear=True):
+            with patch("langgraph.checkpoint.postgres.PostgresSaver.from_conn_string",
+                       side_effect=OSError("offline")):
+                runtime = build_durability_runtime()
+        self.assertTrue(runtime.status.checkpoint.configured)
+        self.assertFalse(runtime.status.checkpoint.verified)
+        self.assertIsNone(runtime.checkpointer)
+
+    def test_postgres_checkpointer_context_stays_open_without_schema_setup(self):
+        """The application owns the context manager for as long as the graph uses it."""
+        saver = MagicMock()
+        context = MagicMock()
+        context.__enter__.return_value = saver
+        store = MagicMock()
+        with patch.dict("os.environ", {"DATABASE_URL": "postgresql://configured"}, clear=True):
+            with patch("src.platform.jobqueue.PostgresJobStore", return_value=store):
+                with patch("langgraph.checkpoint.postgres.PostgresSaver.from_conn_string", return_value=context):
+                    runtime = build_durability_runtime()
+        saver.setup.assert_not_called()
+        saver.get_tuple.assert_called_once()
+        context.__exit__.assert_not_called()
+        runtime.close()
+        context.__exit__.assert_called_once()
+
     def test_agent_graph_compiles_with_durable_checkpointer(self):
-        graph = build_agent_graph(build_demo_workflow())
+        with patch.dict("os.environ", {}, clear=True):
+            graph = build_agent_graph(
+                build_demo_workflow(), checkpointer=durable_checkpointer()
+            )
         self.assertIsNotNone(graph)
-        cp = durable_checkpointer()
+        with patch.dict("os.environ", {}, clear=True):
+            cp = durable_checkpointer()
         self.assertIsNotNone(cp)
-        self.assertIsNotNone(JOB_STORE)
 
 
 if __name__ == "__main__":

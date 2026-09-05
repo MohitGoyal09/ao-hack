@@ -1,8 +1,9 @@
 """Durable revision-run job queue with leases and fencing tokens.
 
 Online path: Postgres table ``public.revision_run_jobs`` via ``DATABASE_URL``
-(psycopg). Offline path (no env vars / no driver / connection failure): an
-in-process store with identical semantics so the test suite runs offline.
+(psycopg). Offline path (no database configuration): an in-process store with
+identical semantics so the test suite runs offline. A configured durable path
+must initialize successfully; it never silently downgrades to memory.
 
 Fencing: every lease grant bumps ``fencing_token``. ``complete``/``fail``
 require the caller to present the token it was granted; a worker that lost
@@ -15,8 +16,9 @@ import os
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import Any, Literal
 
 ACTIVE_STATES = ("queued", "running", "waiting_review")
 TERMINAL_STATES = ("completed", "failed", "cancelled")
@@ -28,6 +30,79 @@ class StaleLeaseError(RuntimeError):
 
 class JobConflictError(RuntimeError):
     pass
+
+
+class DurabilityConfigurationError(RuntimeError):
+    """A configured durable dependency could not be initialized safely."""
+
+
+@dataclass(frozen=True)
+class DurabilityComponentStatus:
+    """Public, redacted status for one durable dependency."""
+
+    component: Literal["queue", "checkpoint"]
+    configured: bool
+    verified: bool
+    mode: Literal["postgres", "offline-memory"]
+    error: str | None = None
+
+    @classmethod
+    def offline(cls, component: Literal["queue", "checkpoint"]) -> "DurabilityComponentStatus":
+        return cls(component=component, configured=False, verified=False, mode="offline-memory")
+
+    @classmethod
+    def failed(cls, component: Literal["queue", "checkpoint"]) -> "DurabilityComponentStatus":
+        return cls(
+            component=component,
+            configured=True,
+            verified=False,
+            mode="postgres",
+            error=f"configured {component} is unavailable",
+        )
+
+
+@dataclass(frozen=True)
+class DurabilityStatus:
+    """Typed public readiness contract; queue and checkpoints are independent."""
+
+    queue: DurabilityComponentStatus
+    checkpoint: DurabilityComponentStatus
+
+    @property
+    def ready(self) -> bool:
+        return all(
+            not component.configured or component.verified
+            for component in (self.queue, self.checkpoint)
+        )
+
+    @property
+    def degraded(self) -> bool:
+        return not self.queue.configured and not self.checkpoint.configured
+
+    def public_dict(self) -> dict[str, dict[str, object]]:
+        return {"queue": asdict(self.queue), "checkpoint": asdict(self.checkpoint)}
+
+
+class DurabilityRuntime:
+    """Owns durable connection lifetimes for one application instance."""
+
+    def __init__(
+        self,
+        *,
+        status: DurabilityStatus,
+        job_store: MemoryJobStore | None,
+        checkpointer: Any | None,
+        checkpointer_context: Any | None = None,
+    ) -> None:
+        self.status = status
+        self.job_store = job_store
+        self.checkpointer = checkpointer
+        self._checkpointer_context = checkpointer_context
+
+    def close(self) -> None:
+        if self._checkpointer_context is not None:
+            context, self._checkpointer_context = self._checkpointer_context, None
+            context.__exit__(None, None, None)
 
 
 @dataclass
@@ -318,28 +393,95 @@ def job_store_from_env() -> MemoryJobStore:
             store = PostgresJobStore(dsn)
             store._conn()
             return store
-        except Exception:
-            pass
+        except Exception as error:
+            raise DurabilityConfigurationError(
+                "Configured database job queue is unavailable; refusing memory fallback") from error
     return MemoryJobStore()
 
 
-def durable_checkpointer():
-    """LangGraph checkpointer: Postgres when configured, else in-memory.
-
-    Checkpoints preserve execution state but do not reschedule work after a
-    crash; the job table above owns restart/retry.
-    """
+def configured_database_url() -> str | None:
+    """Return the configured durable DSN without exposing it in diagnostics."""
     dsn = (os.getenv("DATABASE_URL", "") or os.getenv("SUPABASE_DB_URL", "")).strip()
-    if dsn:
-        try:
-            from langgraph.checkpoint.postgres import PostgresSaver
-            saver = PostgresSaver.from_conn_string(dsn)
-            saver.setup()
-            return saver
-        except Exception:
-            pass
-    from langgraph.checkpoint.memory import MemorySaver
-    return MemorySaver()
+    return dsn or None
+
+
+def _verify_checkpoint_schema(saver: Any) -> None:
+    """Perform a read-only checkpoint query; setup is an operator action.
+
+    ``PostgresSaver.setup`` mutates shared schema and is deliberately never
+    called by the web process. ``get_tuple`` validates that the existing tables
+    and migrations can be read without writing a checkpoint.
+    """
+    saver.get_tuple({"configurable": {"thread_id": "__readiness_probe__"}})
+
+
+def build_durability_runtime(dsn: str | None = None) -> DurabilityRuntime:
+    """Construct one app-owned durable runtime, retaining the saver context.
+
+    A configured dependency failure is reported independently for queue and
+    checkpoint. The process can still serve liveness/readiness endpoints, but
+    business traffic must be gated by the caller until both verify.
+    """
+    dsn = dsn if dsn is not None else configured_database_url()
+    if not dsn:
+        from langgraph.checkpoint.memory import MemorySaver
+
+        return DurabilityRuntime(
+            status=DurabilityStatus(
+                queue=DurabilityComponentStatus.offline("queue"),
+                checkpoint=DurabilityComponentStatus.offline("checkpoint"),
+            ),
+            job_store=MemoryJobStore(),
+            checkpointer=MemorySaver(),
+        )
+
+    job_store: MemoryJobStore | None = None
+    try:
+        job_store = PostgresJobStore(dsn)
+        job_store._conn()
+        queue_status = DurabilityComponentStatus(
+            component="queue", configured=True, verified=True, mode="postgres"
+        )
+    except Exception:
+        queue_status = DurabilityComponentStatus.failed("queue")
+
+    saver: Any | None = None
+    saver_context: Any | None = None
+    try:
+        from langgraph.checkpoint.postgres import PostgresSaver
+
+        saver_context = PostgresSaver.from_conn_string(dsn)
+        saver = saver_context.__enter__()
+        _verify_checkpoint_schema(saver)
+        checkpoint_status = DurabilityComponentStatus(
+            component="checkpoint", configured=True, verified=True, mode="postgres"
+        )
+    except Exception:
+        if saver_context is not None:
+            saver_context.__exit__(None, None, None)
+        saver_context = None
+        saver = None
+        checkpoint_status = DurabilityComponentStatus.failed("checkpoint")
+
+    return DurabilityRuntime(
+        status=DurabilityStatus(queue=queue_status, checkpoint=checkpoint_status),
+        job_store=job_store,
+        checkpointer=saver,
+        checkpointer_context=saver_context,
+    )
+
+
+def durable_checkpointer():
+    """Compatibility helper for intentional offline execution only.
+
+    Production code must use :func:`build_durability_runtime` so that the
+    ``from_conn_string`` context manager remains alive for the graph lifetime.
+    """
+    if configured_database_url():
+        raise DurabilityConfigurationError(
+            "Configured checkpointer requires an application-owned durability runtime"
+        )
+    return build_durability_runtime().checkpointer
 
 
 # Small helper so CPU-heavy parsing runs off the request event loop.

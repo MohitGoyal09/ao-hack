@@ -22,13 +22,9 @@ from src.covenant.ingestion import (
     extract_aon_financials,
     extract_aon_rule,
 )
-from src.platform.jobqueue import durable_checkpointer, job_store_from_env
-
-# Durable job tracking owns restart/retry across process death; LangGraph
-# checkpoints preserve execution state only. Client disconnect never cancels
-# a job — cancellation is an explicit, authenticated command.
-JOB_STORE = job_store_from_env()
-
+from src.platform.jobqueue import (
+    durable_checkpointer,
+)
 
 SYSTEM_PROMPT = """
 You are the Covenant Certificate treasury copilot. Help finance reviewers understand
@@ -137,10 +133,16 @@ def reevaluate_case(
     return result.model_dump_json(exclude={"trace": {"__all__": {"artifact_hash"}}})
 
 
-def build_agent_graph(workflow: CovenantWorkflow):
+def build_agent_graph(workflow: CovenantWorkflow, *, checkpointer=None):
+    """Compile against the application-owned checkpointer.
+
+    The optional default is restricted to explicit offline use for legacy
+    command-line callers; the FastAPI factory always supplies its live runtime.
+    """
+    checkpointer = checkpointer if checkpointer is not None else durable_checkpointer()
     api_key = os.getenv("LITELLM_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return _build_offline_graph(workflow)
+        return _build_offline_graph(workflow, checkpointer)
 
     @tool
     def list_covenant_cases() -> str:
@@ -200,11 +202,11 @@ def build_agent_graph(workflow: CovenantWorkflow):
         model=model,
         tools=[list_covenant_cases, run_covenant_case, ingest_covenant_document, reevaluate_covenant_case],
         system_prompt=SYSTEM_PROMPT,
-        checkpointer=durable_checkpointer(),
+        checkpointer=checkpointer,
     )
 
 
-def _build_offline_graph(workflow: CovenantWorkflow):
+def _build_offline_graph(workflow: CovenantWorkflow, checkpointer):
     def respond(state: MessagesState) -> dict:
         message = str(state["messages"][-1].content).lower()
         matching = [case for case in workflow.list_cases() if case["id"] in message]
@@ -230,4 +232,4 @@ def _build_offline_graph(workflow: CovenantWorkflow):
     builder.add_node("covenant_copilot", respond)
     builder.add_edge(START, "covenant_copilot")
     builder.add_edge("covenant_copilot", END)
-    return builder.compile(checkpointer=durable_checkpointer())
+    return builder.compile(checkpointer=checkpointer)
