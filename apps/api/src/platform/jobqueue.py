@@ -63,24 +63,34 @@ class DurabilityComponentStatus:
 
 @dataclass(frozen=True)
 class DurabilityStatus:
-    """Typed public readiness contract; queue and checkpoints are independent."""
+    """Typed public readiness contract; queue, checkpoints, revisions independent."""
 
     queue: DurabilityComponentStatus
     checkpoint: DurabilityComponentStatus
+    revisions: DurabilityComponentStatus | None = None
+
+    def _components(self) -> tuple[DurabilityComponentStatus, ...]:
+        parts = [self.queue, self.checkpoint]
+        if self.revisions is not None:
+            parts.append(self.revisions)
+        return tuple(parts)
 
     @property
     def ready(self) -> bool:
         return all(
             not component.configured or component.verified
-            for component in (self.queue, self.checkpoint)
+            for component in self._components()
         )
 
     @property
     def degraded(self) -> bool:
-        return not self.queue.configured and not self.checkpoint.configured
+        return all(not component.configured for component in self._components())
 
     def public_dict(self) -> dict[str, dict[str, object]]:
-        return {"queue": asdict(self.queue), "checkpoint": asdict(self.checkpoint)}
+        base = {"queue": asdict(self.queue), "checkpoint": asdict(self.checkpoint)}
+        if self.revisions is not None:
+            base["revisions"] = asdict(self.revisions)
+        return base
 
 
 class DurabilityRuntime:

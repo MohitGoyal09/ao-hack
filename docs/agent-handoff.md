@@ -203,8 +203,8 @@ production agent workflow.
 
 | Priority | Gap | Consequence |
 |---|---|---|
-| P0 | Global in-memory `RevisionStore` | restart loses revisions, issues, events, idempotency, approvals |
-| P0 | Revision/review/approval routes lack auth | body-supplied actor and role are not a real authority boundary |
+| P0 | ~~Global in-memory `RevisionStore`~~ done 2026-09-05: Postgres repository with reconstruction-proof tests; memory remains explicit offline mode only | persistence slice landed; hosted push of new migration pending |
+| P0 | ~~Revision/review/approval routes lack auth~~ done 2026-09-05: server identity, org membership, reviewer/officer roles, 401/403/404/409 | same as above |
 | P0 | Queue is not wired to API execution | runs execute inline; no worker consumes durable jobs |
 | P0 | Postgres/checkpoint packages are absent from `pyproject.toml` | configured durability can silently fall back to memory |
 | P0 | Configured durability catches broad errors | a broken database can look like a working offline system |
@@ -298,6 +298,39 @@ Owner: revision repository, API auth, new forward migration, integration tests.
 
 Done when: data survives restart, cross-tenant access fails, 409 semantics survive
 restart, and body actor/role cannot raise privilege.
+
+Implementation update (2026-09-05, commit pending):
+
+- New `src/covenant/revision_repository.py`: `RevisionRepository` protocol
+  (`ensure_case`, `current`, `get`, `create_revision`, `impact`,
+  `resolve_issue`, `approve`, `snapshot`, `append_event`, `list_events` plus
+  `get_case_org`/`get_member_role`/`get_issue_case`/`member_orgs`),
+  `MemoryRevisionRepository` for offline/demo, `PostgresRevisionRepository`
+  (psycopg, short transactions, numeric money, advisory-lock event sequencing)
+  when `DATABASE_URL` is configured. Configured-but-broken DB raises
+  `DurabilityConfigurationError`: readiness reports `revisions` unready (503)
+  and revision routes return 503. Never falls back to memory.
+- Approvals stay append-only: superseded is a read-model derivation
+  (target != head), so the immutable-mutation trigger is never tripped.
+- All five private routes require server identity: 401 missing/invalid,
+  403 reviewer/officer role, 404 unknown or foreign-tenant case, 409 stale
+  revision/hash or idempotency conflict. Body `actor`/`role` are ignored;
+  approval binds officer user ID, role, exact ratio/threshold/comparator/inputs,
+  package hash, reason, timestamp.
+- New forward-only migration `20260905181359_revision_persistence_support`
+  (threshold/rule_id on revisions, text-identifier change/impact columns,
+  external issue IDs + resolution fields, approval bundle_hash, decision
+  response replay, `case_snapshots`, `revision_idempotency`, indexes, RLS).
+  The four applied migrations are untouched; linked list shows 4/4 hosted
+  matches plus the one pending local migration (shared-project push needs
+  team approval).
+- Backend suite: 67 tests, 60 pass + 7 skipped offline; 66 pass + 1 skipped
+  with `TEST_DATABASE_URL` against local Supabase (restart/reconstruction,
+  supersede, idempotency survival all green). Frontend production build passes.
+  Local `supabase db lint` clean. `git diff --check` clean.
+- Remaining Phase 2 limits: demo cases are seeded per-organization on first
+  access (no real case-creation API yet — Phase 3); offline tokens are demo
+  credentials, not Supabase sessions; hosted RLS with real users unverified.
 
 ### Phase 3 — Build immutable document intake
 

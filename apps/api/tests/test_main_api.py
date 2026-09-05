@@ -2,7 +2,10 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from main import app
+from main import app, revision_store
+
+REVIEWER = {"Authorization": "Bearer demo-user:treasury_reviewer:demo-org"}
+OFFICER = {"Authorization": "Bearer officer-1:officer:demo-org"}
 
 
 class CovenantApiTests(unittest.TestCase):
@@ -43,7 +46,7 @@ class CovenantApiTests(unittest.TestCase):
 
     def test_revision_flow_with_stale_rejection_and_idempotency(self):
         case_id = "beacon-gross-leverage"
-        snap = self.client.get(f"/api/cases/{case_id}/snapshot")
+        snap = self.client.get(f"/api/cases/{case_id}/snapshot", headers=REVIEWER)
         self.assertEqual(snap.status_code, 200)
         rev1 = snap.json()["revision"]["revision_id"]
         bundle1 = snap.json()["revision"]["input_bundle_hash"]
@@ -53,13 +56,15 @@ class CovenantApiTests(unittest.TestCase):
             f"/api/cases/{case_id}/revisions",
             json={"expected_parent_revision": rev1, "change_kind": "amendment",
                   "documents": ["amendment-2"], "new_threshold": 4.25},
+            headers=REVIEWER,
         )
         self.assertEqual(created.status_code, 200)
         rev2 = created.json()["revision_id"]
         self.assertNotEqual(rev2, rev1)
         self.assertIsInstance(created.json()["revision"]["threshold"], str)
 
-        impact = self.client.get(f"/api/cases/{case_id}/revisions/{rev2}/impact")
+        impact = self.client.get(f"/api/cases/{case_id}/revisions/{rev2}/impact",
+                                 headers=REVIEWER)
         self.assertEqual(impact.status_code, 200)
         self.assertTrue(impact.json()["affected_rule_ids"])
         self.assertTrue(impact.json()["stale_artifact_ids"])
@@ -69,25 +74,29 @@ class CovenantApiTests(unittest.TestCase):
             f"/api/cases/{case_id}/revisions",
             json={"expected_parent_revision": rev1, "change_kind": "amendment",
                   "documents": ["amendment-3"]},
+            headers=REVIEWER,
         )
         self.assertEqual(stale.status_code, 409)
 
         # Resolve the fresh review issue; duplicate key + same payload replays.
-        snap2 = self.client.get(f"/api/cases/{case_id}/snapshot")
+        snap2 = self.client.get(f"/api/cases/{case_id}/snapshot", headers=REVIEWER)
         bundle2 = snap2.json()["revision"]["input_bundle_hash"]
         issue_id = f"{case_id}-{rev2}-evidence-1"
         payload = {"revision_id": rev2, "expected_bundle_hash": bundle2,
                    "decision_kind": "accept_evidence", "rationale": "verified",
                    "evidence_refs": ["doc:amendment-2"], "idempotency_key": "key-1"}
-        first = self.client.post(f"/api/review-issues/{issue_id}/resolve", json=payload)
+        first = self.client.post(f"/api/review-issues/{issue_id}/resolve", json=payload,
+                                 headers=REVIEWER)
         self.assertEqual(first.status_code, 200)
-        replay = self.client.post(f"/api/review-issues/{issue_id}/resolve", json=payload)
+        replay = self.client.post(f"/api/review-issues/{issue_id}/resolve", json=payload,
+                                  headers=REVIEWER)
         self.assertEqual(replay.status_code, 200)
         self.assertEqual(replay.json(), first.json())
 
         # Same key + different payload -> conflict.
         clash = dict(payload, rationale="changed mind")
-        conflict = self.client.post(f"/api/review-issues/{issue_id}/resolve", json=clash)
+        conflict = self.client.post(f"/api/review-issues/{issue_id}/resolve", json=clash,
+                                    headers=REVIEWER)
         self.assertEqual(conflict.status_code, 409)
 
         # Stale resolve against old revision/bundle -> 409.
@@ -97,17 +106,18 @@ class CovenantApiTests(unittest.TestCase):
             json={"revision_id": rev1, "expected_bundle_hash": bundle1,
                   "decision_kind": "accept_evidence", "rationale": "late",
                   "evidence_refs": [], "idempotency_key": "key-2"},
+            headers=REVIEWER,
         )
         self.assertEqual(stale_resolve.status_code, 409)
 
         # Officer approval binds to the exact current package hash.
-        snap3 = self.client.get(f"/api/cases/{case_id}/snapshot")
+        snap3 = self.client.get(f"/api/cases/{case_id}/snapshot", headers=OFFICER)
         package_hash = snap3.json()["package_hash"]
         approval = self.client.post(
             f"/api/cases/{case_id}/officer-approval",
             json={"revision_id": rev2, "package_hash": package_hash,
-                  "actor": "officer-1", "role": "officer",
                   "decision": "approved", "reason": "reviewed"},
+            headers=OFFICER,
         )
         self.assertEqual(approval.status_code, 200)
 
@@ -116,29 +126,28 @@ class CovenantApiTests(unittest.TestCase):
             f"/api/cases/{case_id}/revisions",
             json={"expected_parent_revision": rev2, "change_kind": "amendment",
                   "documents": ["amendment-3"]},
+            headers=REVIEWER,
         )
         rev3 = created2.json()["revision_id"]
         reused = self.client.post(
             f"/api/cases/{case_id}/officer-approval",
             json={"revision_id": rev2, "package_hash": package_hash,
-                  "actor": "officer-1", "role": "officer",
                   "decision": "approved", "reason": "reused"},
+            headers=OFFICER,
         )
         self.assertEqual(reused.status_code, 409)
         wrong_hash = self.client.post(
             f"/api/cases/{case_id}/officer-approval",
             json={"revision_id": rev3, "package_hash": "deadbeef",
-                  "actor": "officer-1", "role": "officer",
                   "decision": "approved", "reason": "wrong hash"},
+            headers=OFFICER,
         )
         self.assertEqual(wrong_hash.status_code, 409)
 
 
     def test_approval_locks_exact_numbers_and_supersedes(self):
-        from main import revision_store
-
         case_id = "aurora-net-leverage"
-        snap = self.client.get(f"/api/cases/{case_id}/snapshot")
+        snap = self.client.get(f"/api/cases/{case_id}/snapshot", headers=REVIEWER)
         self.assertEqual(snap.status_code, 200)
         rev1 = snap.json()["revision"]["revision_id"]
         bundle = snap.json()["revision"]["input_bundle_hash"]
@@ -155,10 +164,11 @@ class CovenantApiTests(unittest.TestCase):
                   "decision_kind": "accept_evidence", "rationale": "verified",
                   "evidence_refs": ["doc:aurora-original"],
                   "idempotency_key": f"lock-test-{rev1}-1"},
+            headers=REVIEWER,
         )
         self.assertEqual(resolve.status_code, 200)
 
-        snap2 = self.client.get(f"/api/cases/{case_id}/snapshot")
+        snap2 = self.client.get(f"/api/cases/{case_id}/snapshot", headers=OFFICER)
         package_hash = snap2.json()["package_hash"]
         threshold = snap2.json()["revision"]["threshold"]
 
@@ -166,9 +176,9 @@ class CovenantApiTests(unittest.TestCase):
         drifted = self.client.post(
             f"/api/cases/{case_id}/officer-approval",
             json={"revision_id": rev1, "package_hash": package_hash,
-                  "actor": "officer-1", "role": "officer",
                   "decision": "approved", "reason": "drift check",
                   "approved_threshold": "3.75"},
+            headers=OFFICER,
         )
         self.assertEqual(drifted.status_code, 409)
         self.assertIn("threshold changed from 3.75", drifted.json()["detail"])
@@ -177,9 +187,9 @@ class CovenantApiTests(unittest.TestCase):
         approval = self.client.post(
             f"/api/cases/{case_id}/officer-approval",
             json={"revision_id": rev1, "package_hash": package_hash,
-                  "actor": "officer-1", "role": "officer",
                   "decision": "approved", "reason": "reviewed",
                   "approved_threshold": threshold},
+            headers=OFFICER,
         )
         self.assertEqual(approval.status_code, 200)
         body = approval.json()
@@ -195,6 +205,7 @@ class CovenantApiTests(unittest.TestCase):
             f"/api/cases/{case_id}/revisions",
             json={"expected_parent_revision": rev1, "change_kind": "amendment",
                   "documents": ["amendment-9"], "new_threshold": 4.25},
+            headers=REVIEWER,
         )
         self.assertEqual(created.status_code, 200)
         rev2 = created.json()["revision_id"]
@@ -206,8 +217,8 @@ class CovenantApiTests(unittest.TestCase):
         reused = self.client.post(
             f"/api/cases/{case_id}/officer-approval",
             json={"revision_id": rev1, "package_hash": package_hash,
-                  "actor": "officer-1", "role": "officer",
                   "decision": "approved", "reason": "reused"},
+            headers=OFFICER,
         )
         self.assertEqual(reused.status_code, 409)
 
