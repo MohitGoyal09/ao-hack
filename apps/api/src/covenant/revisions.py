@@ -135,6 +135,11 @@ class UnknownRevisionError(LookupError):
     pass
 
 
+def _rev_num(revision_id: str) -> int:
+    """Numeric head ordering: string max() would rank rev-9 above rev-10."""
+    return int(revision_id.rsplit("-", 1)[1])
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -173,7 +178,7 @@ class RevisionStore:
         with self._lock:
             existing = self._revisions.get(case_id, {})
             if existing:
-                return existing[max(existing)]
+                return existing[max(existing, key=_rev_num)]
             bundle = stable_hash({"docs": sorted(doc_ids), "facts": sorted(fact_keys)})
             rulebook = stable_hash({"rule": rule_id, "threshold": money_str(threshold)})
             mapping = stable_hash({"rule": rule_id, "facts": sorted(fact_keys)})
@@ -218,7 +223,7 @@ class RevisionStore:
             revs = self._revisions.get(case_id)
             if not revs:
                 raise UnknownRevisionError(case_id)
-            return revs[max(revs)]
+            return revs[max(revs, key=_rev_num)]
 
     def get(self, case_id: str, revision_id: str) -> CaseRevision:
         with self._lock:
@@ -241,7 +246,7 @@ class RevisionStore:
             revs = self._revisions.get(case_id)
             if not revs:
                 raise UnknownRevisionError(case_id)
-            head = revs[max(revs)]
+            head = revs[max(revs, key=_rev_num)]
             if head.revision_id != expected_parent:
                 raise StaleCommandError(
                     f"expected parent {expected_parent} does not match current {head.revision_id}"

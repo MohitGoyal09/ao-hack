@@ -368,7 +368,7 @@ class PostgresRevisionRepository:
                 existing = cur.fetchall()
                 if existing:
                     conn.commit()
-                    return self._rev_from_row(max(existing, key=lambda r: r[1]))
+                    return self._rev_from_row(existing[-1])  # ordered by created_at
                 bundle = stable_hash({"docs": sorted(doc_ids), "facts": sorted(fact_keys)})
                 rulebook = stable_hash({"rule": rule_id, "threshold": threshold_s})
                 mapping = stable_hash({"rule": rule_id, "facts": sorted(fact_keys)})

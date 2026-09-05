@@ -77,6 +77,22 @@ class MemoryRepositoryTests(unittest.TestCase):
             repo.create_revision(case, org, user, head.revision_id, "amendment",
                                  ["doc-3"], [], None)
 
+    def test_head_is_numeric_past_rev_10(self) -> None:
+        # String ordering ranks "rev-9" above "rev-10"; the head must be numeric.
+        repo = MemoryRevisionRepository()
+        org, user, case = _ids("case")
+        repo.ensure_case(case, org, user, "2026-06-30", "rule-1", "4.00",
+                         ["doc-1"], ["f1"])
+        for i in range(2, 13):
+            head = repo.current(case)
+            repo.create_revision(case, org, user, head.revision_id, "amendment",
+                                 [f"doc-{i}"], [], None)
+        self.assertEqual(repo.current(case).revision_id, "rev-12")
+        again = repo.ensure_case(case, org, user, "2026-06-30", "rule-1", "4.00",
+                                 ["doc-1"], ["f1"])
+        self.assertEqual(again.revision_id, "rev-12")
+        self.assertEqual(repo.snapshot(case)["revision"]["revision_id"], "rev-12")
+
     def test_idempotency_same_key_same_request_replays(self) -> None:
         repo = MemoryRevisionRepository()
         org, user, case = _ids("case")
