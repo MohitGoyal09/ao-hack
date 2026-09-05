@@ -348,6 +348,31 @@ Owner: document API/service, Storage adapter, parser interfaces, tests.
 Done when: one authenticated upload creates one immutable object, document
 version, case revision, queued job, and durable event.
 
+Implementation update (2026-09-06, commit pending):
+
+- New `src/platform/storage.py`: `StorageAdapter` protocol with memory
+  (offline/demo) and Supabase private-bucket implementations.
+- New `src/covenant/documents.py`: `DocumentService` (memory or psycopg)
+  with role/media/size validation, streaming SHA-256, tenant storage paths,
+  immutable version rows (`version_number = max+1` under row lock),
+  same-bytes idempotent re-upload, and `pending`/`needs_ocr`/`unsupported`
+  classification (bounded pdfplumber probe, never 500 on crafted bytes).
+- `POST /api/cases/{case_id}/documents` (reviewer+): one upload creates one
+  immutable object, one document version, one `document_upload` case revision,
+  one `DOCUMENT_UPLOADED` event, and one queued job (409 on revision or job
+  race). `GET /api/documents/{document_id}` returns metadata only.
+  401/403/404 semantics match the revision routes.
+- Agent `ingest_covenant_document` now takes `document_id`, rejects
+  path-like input, resolves bytes through the service, and returns
+  `unsupported` for non-Aon content instead of inventing figures.
+- Migration `20260905181359_revision_persistence_support` applied to hosted
+  (linked list 5/5 match, hosted lint clean).
+- Backend suite: 95 tests, 85 pass + 10 skipped offline; 94 pass + 1 skipped
+  with integration DB. Frontend build passes. Local lint clean.
+- Limits: no worker consumes queued jobs yet (Phase 4); extraction beyond
+  the Aon shape returns `unsupported`; borrower/facility/dates/period
+  metadata accepted but not yet validated against a case master.
+
 ### Phase 4 — Connect the queue to the covenant workflow
 
 Owner: worker entry point, queue calls, orchestrator, case repository, recovery.

@@ -36,6 +36,137 @@ Do not reveal hidden reasoning. Give concise evidence-based explanations.
 """
 
 
+def ingest_covenant_document(case_id: str, document_id: str, document_kind: str) -> str:
+    """Ingest a stored covenant document into a case by document ID.
+
+    The document must already be stored via ``POST /api/cases/{case_id}/documents``.
+    No filesystem paths are accepted: any ``document_id`` containing ``"/"``,
+    ``"\\"``, or ``".."`` raises ``ValueError``. Bytes are resolved via
+    ``DocumentService.read_bytes`` under the offline demo organization
+    (``"demo-org"``) and run through the deterministic extraction module
+    (``extract_aon_rule`` / ``extract_aon_financials``); stored bytes are
+    spooled to a temporary file only because the extractors require a path,
+    and the temp file is always deleted. Content the deterministic extractors
+    cannot parse returns ``{"extraction_state": "unsupported", ...}`` without
+    inventing figures. ``document_kind`` is ``'agreement'``, ``'financials'``,
+    or ``'full-case'``.
+    """
+    kind = document_kind.lower()
+    if "/" in document_id or "\\" in document_id or ".." in document_id:
+        raise ValueError(
+            f"document_id {document_id!r} must be a stored document identifier, "
+            "not a filesystem path."
+        )
+    if kind not in ("agreement", "financials", "full-case"):
+        raise ValueError(
+            f"Unknown document_kind {document_kind!r}; expected 'agreement', "
+            "'financials', or 'full-case'."
+        )
+    if kind == "full-case":
+        case = build_aon_term_loan_case()
+        return json.dumps(
+            {
+                "case_id": case.id,
+                "name": case.name,
+                "agreement": case.agreement,
+                "test_date": case.test_date,
+                "threshold": case.rule.threshold,
+                "facts": [
+                    {"key": fact.key, "amount": fact.amount, "locator": fact.source_locator}
+                    for fact in case.facts
+                ],
+            }
+        )
+
+    def _document_service():
+        try:
+            import main as _main
+
+            service = getattr(_main, "_documents", None)
+            if service is not None:
+                return service
+        except Exception:
+            pass
+        from src.covenant.documents import DocumentService
+        from src.covenant.revision_repository import (
+            configured_database_url as revision_database_url,
+        )
+        from src.platform.storage import MemoryStorageAdapter
+
+        return DocumentService(revision_database_url(), MemoryStorageAdapter())
+
+    service = _document_service()
+    _, content = service.read_bytes(document_id, "demo-org")
+
+    import tempfile
+    from pathlib import Path
+
+    suffix = ".pdf" if kind == "agreement" else ".html"
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+            handle.write(content)
+            tmp_path = Path(handle.name)
+        if kind == "agreement":
+            rule = extract_aon_rule(tmp_path)
+            payload = {
+                "case_id": case_id,
+                "document_kind": "agreement",
+                "document_id": rule.document_id,
+                "source_document_id": document_id,
+                "document_title": rule.document_title,
+                "document_hash": rule.document_hash,
+                "rule": {
+                    "name": rule.name,
+                    "formula_label": rule.formula_label,
+                    "comparator": rule.comparator,
+                    "section": rule.section,
+                    "section_page": rule.section_page,
+                    "section_excerpt": rule.section_excerpt,
+                    "definition_page": rule.definition_page,
+                    "definition_excerpt": rule.definition_excerpt,
+                    "tiers": [
+                        {"step": tier.step, "threshold": tier.threshold}
+                        for tier in rule.tiers
+                    ],
+                },
+            }
+            return json.dumps(payload)
+        facts = extract_aon_financials(tmp_path)
+        return json.dumps(
+            {
+                "case_id": case_id,
+                "document_kind": "financials",
+                "source_document_id": document_id,
+                "facts": [
+                    {
+                        "key": fact.key,
+                        "label": fact.label,
+                        "amount": fact.amount,
+                        "locator": fact.locator,
+                    }
+                    for fact in facts
+                ],
+            }
+        )
+    except Exception as error:
+        return json.dumps(
+            {
+                "case_id": case_id,
+                "document_id": document_id,
+                "document_kind": kind,
+                "extraction_state": "unsupported",
+                "reason": str(error),
+            }
+        )
+    finally:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def ingest_document_for_case(case_id: str, document_path: str, document_kind: str) -> str:
     """Ingest a newly uploaded/referenced document into a case.
 
@@ -167,17 +298,21 @@ def build_agent_graph(workflow: CovenantWorkflow, *, checkpointer=None):
         )
         return result.model_dump_json(exclude={"trace": {"__all__": {"artifact_hash"}}})
 
+    _ingest_impl = globals()["ingest_covenant_document"]
+
     @tool
     def ingest_covenant_document(
-        case_id: str, document_path: str, document_kind: str
+        case_id: str, document_id: str, document_kind: str
     ) -> str:
-        """Ingest a newly uploaded/referenced document into a case.
+        """Ingest a stored covenant document into a case by document ID.
 
-        document_kind is 'agreement', 'financials', or 'full-case'.
-        Parses the real source file with the deterministic ingestion module
-        and returns extracted rules, facts, hashes, and citations.
+        document_id must be a stored document identifier, never a filesystem
+        path (values containing "/", "\\", or ".." are rejected). document_kind is
+        'agreement', 'financials', or 'full-case'. Bytes are resolved from the
+        document store and parsed with the deterministic ingestion module;
+        unparseable content returns extraction_state 'unsupported'.
         """
-        return ingest_document_for_case(case_id, document_path, document_kind)
+        return _ingest_impl(case_id, document_id, document_kind)
 
     @tool
     def reevaluate_covenant_case(

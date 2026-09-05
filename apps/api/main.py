@@ -18,7 +18,7 @@ observer.initialize()
 
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from copilotkit import LangGraphAGUIAgent
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -28,6 +28,7 @@ from src.platform.jobqueue import (
     DurabilityConfigurationError,
     DurabilityRuntime,
     DurabilityStatus,
+    JobConflictError,
     build_durability_runtime,
 )
 from src.covenant import RunRequest, UnknownCaseError, build_demo_workflow
@@ -83,6 +84,44 @@ combined_durability_status = DurabilityStatus(
 
 # Backwards-compatible alias for tests and tooling.
 revision_store = revision_repository
+
+# Document intake singletons (sibling-owned contract; guarded so the app and
+# existing routes stay up when the sibling branch has not landed yet).
+try:
+    from src.platform.storage import storage_adapter_from_env
+    from src.covenant.documents import (
+        ALLOWED_ROLES,
+        MAX_BYTES,
+        DocumentService,
+        UnknownDocumentError,
+    )
+
+    _intake_contract_error: Exception | None = None
+except Exception as _intake_import_error:  # sibling files not present yet
+    storage_adapter_from_env = None  # type: ignore[assignment]
+    DocumentService = None  # type: ignore[assignment]
+    UnknownDocumentError = None  # type: ignore[assignment]
+    ALLOWED_ROLES = None  # type: ignore[assignment]
+    MAX_BYTES = None  # type: ignore[assignment]
+    _intake_contract_error = _intake_import_error
+
+
+def _platform_storage_client():
+    """Getattr-safe accessor; None when the platform is in offline demo mode."""
+    try:
+        if getattr(platform, "enabled", False):
+            return getattr(platform, "_client", None)
+    except Exception:
+        return None
+    return None
+
+
+if DocumentService is not None and storage_adapter_from_env is not None:
+    _storage = storage_adapter_from_env(_platform_storage_client())
+    _documents = DocumentService(revision_database_url(), _storage)
+else:
+    _storage = None
+    _documents = None
 
 agent_graph = (
     build_agent_graph(workflow, checkpointer=default_durability_runtime.checkpointer)
@@ -539,6 +578,236 @@ async def case_snapshot(
         return repo.snapshot(case_id)
     except UnknownRevisionError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+def _parse_document_location(loc: Any) -> tuple[str | None, str | None, dict | None]:
+    """Best-effort (case_id, organization_id, metadata) from find_location()."""
+    if loc is None:
+        return None, None, None
+    if isinstance(loc, (tuple, list)) and len(loc) >= 2:
+        meta = None
+        if len(loc) >= 3 and isinstance(loc[2], dict):
+            meta = loc[2]
+        return str(loc[0]), str(loc[1]), meta
+    if isinstance(loc, dict):
+        case_id = loc.get("case_id") or loc.get("caseId")
+        org_id = (
+            loc.get("organization_id") or loc.get("org_id")
+            or loc.get("organizationId") or loc.get("org")
+        )
+        meta = dict(loc) if case_id is not None or org_id is not None else None
+        return (
+            str(case_id) if case_id is not None else None,
+            str(org_id) if org_id is not None else None,
+            meta,
+        )
+    case_id = getattr(loc, "case_id", None) or getattr(loc, "caseId", None)
+    org_id = (
+        getattr(loc, "organization_id", None) or getattr(loc, "org_id", None)
+        or getattr(loc, "organizationId", None) or getattr(loc, "org", None)
+    )
+    meta = None
+    to_dict = getattr(loc, "model_dump", None) or getattr(loc, "dict", None)
+    if callable(to_dict):
+        try:
+            dumped = to_dict(mode="json") if "mode" in str(to_dict) else to_dict()
+            if isinstance(dumped, dict):
+                meta = dumped
+        except Exception:
+            meta = None
+    return (
+        str(case_id) if case_id is not None else None,
+        str(org_id) if org_id is not None else None,
+        meta,
+    )
+
+
+@app.post("/api/cases/{case_id}/documents")
+async def upload_case_document(
+    case_id: str,
+    request: Request,
+    principal: Principal = Depends(require_revision_principal),
+    file: UploadFile = File(...),
+    document_role: str = Form(...),
+    title: str = Form(...),
+    document_id: str | None = Form(None),
+    effective_date: str | None = Form(None),
+    period_start: str | None = Form(None),
+    period_end: str | None = Form(None),
+) -> dict:
+    """Store covenant evidence, then version it as exactly one revision+job."""
+    if _documents is None or MAX_BYTES is None:
+        raise HTTPException(status_code=503, detail="Document intake is unavailable")
+    repo = _active_revision_repository()
+    authorization = request.headers.get("authorization")
+    org_id = _ensure_revisions(case_id, principal, authorization)
+    _require_case_member(case_id, principal, authorization)
+    role = _offline_member_role(repo, org_id, principal, authorization)
+    if role is None:
+        raise HTTPException(status_code=404, detail="Unknown covenant case")
+    if role not in REVIEWER_ROLES:
+        raise HTTPException(status_code=403, detail="Insufficient role")
+    data = bytearray()
+    while True:
+        chunk = await file.read(1 << 20)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if len(data) > int(MAX_BYTES):
+            raise HTTPException(status_code=413, detail="Uploaded file exceeds size limit")
+    content = bytes(data)
+    filename = file.filename or "upload"
+    content_type = file.content_type or "application/octet-stream"
+    try:
+        version = _documents.upload(
+            organization_id=org_id,
+            user_id=principal.user_id,
+            case_id=case_id,
+            filename=filename,
+            content_type=content_type,
+            data=content,
+            document_role=document_role,
+            title=title,
+            document_id=document_id,
+            effective_date=effective_date,
+            period_start=period_start,
+            period_end=period_end,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail="Unknown document") from error
+    try:
+        head = repo.current(case_id)
+    except UnknownRevisionError as error:
+        raise HTTPException(status_code=404, detail="Unknown covenant case") from error
+    try:
+        new_rev, _, _ = repo.create_revision(
+            case_id=case_id,
+            organization_id=org_id,
+            user_id=principal.user_id,
+            expected_parent=head.revision_id,
+            change_kind="document_upload",
+            documents=[version.document_id],
+            facts=[],
+        )
+    except UnknownRevisionError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except StaleCommandError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    repo.append_event(
+        case_id,
+        org_id,
+        new_rev.revision_id,
+        None,
+        "DOCUMENT_UPLOADED",
+        {"document_id": version.document_id, "version": version.version_number},
+    )
+    job_store = request.app.state.durability_runtime.job_store
+    try:
+        job = job_store.enqueue(
+            case_id,
+            new_rev.revision_id,
+            {"document_id": version.document_id, "version": version.version_number},
+        )
+    except JobConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {
+        "document_id": version.document_id,
+        "version_id": version.id,
+        "version_number": version.version_number,
+        "sha256": version.sha256,
+        "extraction_state": version.extraction_state,
+        "revision_id": new_rev.revision_id,
+        "job_id": job.id,
+    }
+
+
+@app.get("/api/documents/{document_id}")
+async def get_document(
+    document_id: str,
+    request: Request,
+    principal: Principal = Depends(require_revision_principal),
+) -> dict:
+    """Return stored-document metadata; never raw file bytes."""
+    if _documents is None:
+        raise HTTPException(status_code=503, detail="Document intake is unavailable")
+    authorization = request.headers.get("authorization")
+    repo = _active_revision_repository()
+    find_location = getattr(_documents, "find_location", None)
+    if find_location is None:
+        raise HTTPException(status_code=503, detail="Document lookup is unavailable")
+    try:
+        loc = find_location(document_id)
+    except Exception as error:
+        if UnknownDocumentError is not None and isinstance(error, UnknownDocumentError):
+            raise HTTPException(status_code=404, detail="Unknown document") from error
+        if isinstance(error, LookupError):
+            raise HTTPException(status_code=404, detail="Unknown document") from error
+        raise
+    case_id, org_id, meta = _parse_document_location(loc)
+    if not case_id or not org_id:
+        raise HTTPException(status_code=404, detail="Unknown document")
+    role = _offline_member_role(repo, org_id, principal, authorization)
+    if role is None:
+        raise HTTPException(status_code=404, detail="Unknown document")
+    if meta is not None:
+        metadata: dict = {
+            k: v for k, v in dict(meta).items()
+            if k not in ("data", "bytes", "content", "file_bytes")
+        }
+        metadata.setdefault("document_id", document_id)
+        metadata.setdefault("case_id", case_id)
+        metadata.setdefault("organization_id", org_id)
+        return metadata
+    for method_name in ("describe", "get_metadata", "metadata", "get", "info"):
+        method = getattr(_documents, method_name, None)
+        if method is None:
+            continue
+        for args in (((document_id, org_id),), ((document_id,),)):
+            try:
+                candidate = method(*args[0])
+            except TypeError:
+                continue
+            except Exception as error:
+                if UnknownDocumentError is not None and isinstance(
+                    error, UnknownDocumentError
+                ):
+                    raise HTTPException(
+                        status_code=404, detail="Unknown document"
+                    ) from error
+                if isinstance(error, LookupError):
+                    raise HTTPException(
+                        status_code=404, detail="Unknown document"
+                    ) from error
+                raise
+            if isinstance(candidate, dict):
+                cleaned = {
+                    k: v for k, v in candidate.items()
+                    if k not in ("data", "bytes", "content", "file_bytes")
+                }
+                cleaned.setdefault("document_id", document_id)
+                cleaned.setdefault("case_id", case_id)
+                cleaned.setdefault("organization_id", org_id)
+                return cleaned
+            to_dict = getattr(candidate, "model_dump", None) or getattr(
+                candidate, "dict", None
+            )
+            if callable(to_dict):
+                try:
+                    dumped = to_dict(mode="json")
+                except Exception:
+                    continue
+                if isinstance(dumped, dict):
+                    dumped.setdefault("document_id", document_id)
+                    dumped.setdefault("case_id", case_id)
+                    dumped.setdefault("organization_id", org_id)
+                    return dumped
+    return {
+        "document_id": document_id,
+        "case_id": case_id,
+        "organization_id": org_id,
+    }
 
 
 if agent_graph is not None:
