@@ -36,6 +36,7 @@
 .chip { display: inline-block; font-family: "DM Mono", monospace; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 3px 8px; border: 1px solid; white-space: nowrap; }.chipGood { background: #e1efe4; color: #1d643f; border-color: #458658; }.chipBad { background: #f5e2df; color: #973b33; border-color: #b34f46; }.chipWarn { background: #f4edcf; color: #79611d; border-color: #b59b39; }.chipNeutral { background: #ebece6; color: #3f4a44; border-color: #c4ccc5; }
 .statusStrip { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }.statusStrip .runButton { margin-left: auto; padding: 8px 14px; font-size: 12px; }
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #e5e6e0; font-size: 12px; }.row:last-child { border-bottom: 0; }
+.feed { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow-y: auto; }.feedTime { font-family: "DM Mono", monospace; font-size: 11px; color: #56675b; white-space: nowrap; }
 .stale { background: #faf2dc; border: 1px solid #e1cc91; padding: 12px 16px; font-size: 13px; color: #5c4a12; line-height: 1.5; }
 .muted { color: #59665e; font-size: 12px; margin: 0; line-height: 1.5; }
 .hypo { display: inline-block; font-family: "DM Mono", monospace; font-size: 11px; font-style: normal; letter-spacing: .04em; text-transform: uppercase; color: #7a4a12; background: #fbead0; border: 1px solid #e3c184; padding: 3px 8px; margin-top: 8px; }

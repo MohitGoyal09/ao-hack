@@ -936,6 +936,33 @@ async def list_case_jobs(
     return [_serialize_job_summary(job) for job in _jobs_for_case(job_store, case_id)]
 
 
+@app.get("/api/cases/{case_id}/events")
+async def list_case_events(
+    case_id: str,
+    request: Request,
+    after_sequence: int = 0,
+    limit: int = 200,
+    principal: Principal = Depends(require_revision_principal),
+) -> list[dict]:
+    """Durable domain events for one case, oldest-first, cursor on ``sequence``.
+
+    Payloads are the stored ``redacted_summary`` (ids, hashes, exact numbers);
+    no document text is ever written there, so nothing is stripped here.
+    """
+    authorization = request.headers.get("authorization")
+    _ensure_revisions(case_id, principal, authorization)
+    repo, _ = _require_case_member(case_id, principal, authorization)
+    # ponytail: list_events reads the whole case log and we slice in Python;
+    # push after_sequence/limit into the SQL if a case ever has >10k events.
+    events = [e for e in repo.list_events(case_id) if e["sequence"] > after_sequence]
+    return [
+        {"sequence": e["sequence"], "event_type": e["name"],
+         "revision_id": e.get("revision_id"), "run_id": e.get("run_id"),
+         "payload": e.get("summary") or {}, "created_at": e.get("created_at")}
+        for e in events[:max(1, min(limit, 500))]
+    ]
+
+
 @app.post("/api/jobs/{job_id}/cancel")
 async def cancel_job(
     job_id: str,

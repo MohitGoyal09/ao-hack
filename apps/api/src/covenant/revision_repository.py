@@ -9,6 +9,7 @@ raw agreement or financial text.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -216,7 +217,8 @@ class MemoryRevisionRepository:
         events = self._store._events.setdefault(case_id, [])  # noqa: SLF001
         seq = len(events) + 1
         event = {"sequence": seq, "name": event_type, "revision_id": revision_id,
-                 "run_id": run_id, "summary": dict(redacted_summary or {})}
+                 "run_id": run_id, "summary": dict(redacted_summary or {}),
+                 "created_at": datetime.now(timezone.utc).isoformat()}
         events.append(event)
         return event
 
@@ -1019,15 +1021,16 @@ class PostgresRevisionRepository:
             with conn.cursor() as cur:
                 cur.execute(
                     "select sequence, event_type, revision_id, run_id,"
-                    " redacted_summary from public.domain_events"
+                    " redacted_summary, created_at from public.domain_events"
                     " where case_id = %s order by sequence",
                     (case_id,),
                 )
                 out = []
-                for seq, etype, rev, run, summary in cur.fetchall():
+                for seq, etype, rev, run, summary, created in cur.fetchall():
                     out.append({"sequence": int(seq), "name": etype,
                                 "revision_id": rev, "run_id": run,
-                                "summary": summary if isinstance(summary, dict) else {}})
+                                "summary": summary if isinstance(summary, dict) else {},
+                                "created_at": created.isoformat() if created else None})
                 return out
 
     def get_case_org(self, case_id: str) -> str:

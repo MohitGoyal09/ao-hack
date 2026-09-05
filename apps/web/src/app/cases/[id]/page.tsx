@@ -6,6 +6,7 @@ import { api, Approval, CaseSummary, Job, post, Revision, RunResult, Snapshot, T
 import { SignIn } from "@/components/SignIn";
 import { UploadDocument } from "@/components/UploadDocument";
 import { JobTimeline } from "@/components/JobTimeline";
+import { EventFeed } from "@/components/EventFeed";
 import { ResultPanel } from "@/components/ResultPanel";
 import { ReviewInbox } from "@/components/ReviewInbox";
 import { RevisionPanel } from "@/components/RevisionPanel";
@@ -75,6 +76,7 @@ export default function CasePage({ params }: { params: Promise<{ id: string }> }
         <UploadDocument caseId={id} onChange={refresh} />
         <JobTimeline jobs={jobs} polling={polling} onChange={refresh} />
       </div>
+      <EventFeed caseId={id} polling={polling} />
       <ResultPanel result={result} snapshot={snapshot} />
       {snapshot && <>
         <div className={styles.panelGrid}>
