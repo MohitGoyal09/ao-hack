@@ -17,7 +17,8 @@ class CovenantWorkflowTests(unittest.TestCase):
     def test_catalog_exposes_judge_ready_scenarios(self):
         cases = self.workflow.list_cases()
 
-        self.assertEqual(len(cases), 4)
+        self.assertEqual(len(cases), 5)
+        self.assertIn("aon-term-loan-leverage", {case["id"] for case in cases})
         self.assertEqual(
             {case["scenario_type"] for case in cases},
             {"comparison", "amendment", "evidence_gap"},
