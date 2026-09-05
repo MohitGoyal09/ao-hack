@@ -41,6 +41,98 @@ class CovenantApiTests(unittest.TestCase):
 
         self.assertIn("/ag-ui", paths)
 
+    def test_revision_flow_with_stale_rejection_and_idempotency(self):
+        case_id = "beacon-gross-leverage"
+        snap = self.client.get(f"/api/cases/{case_id}/snapshot")
+        self.assertEqual(snap.status_code, 200)
+        rev1 = snap.json()["revision"]["revision_id"]
+        bundle1 = snap.json()["revision"]["input_bundle_hash"]
+
+        # New threshold replaces the current threshold -> new revision.
+        created = self.client.post(
+            f"/api/cases/{case_id}/revisions",
+            json={"expected_parent_revision": rev1, "change_kind": "amendment",
+                  "documents": ["amendment-2"], "new_threshold": 4.25},
+        )
+        self.assertEqual(created.status_code, 200)
+        rev2 = created.json()["revision_id"]
+        self.assertNotEqual(rev2, rev1)
+        self.assertIsInstance(created.json()["revision"]["threshold"], str)
+
+        impact = self.client.get(f"/api/cases/{case_id}/revisions/{rev2}/impact")
+        self.assertEqual(impact.status_code, 200)
+        self.assertTrue(impact.json()["affected_rule_ids"])
+        self.assertTrue(impact.json()["stale_artifact_ids"])
+
+        # Stale parent -> 409.
+        stale = self.client.post(
+            f"/api/cases/{case_id}/revisions",
+            json={"expected_parent_revision": rev1, "change_kind": "amendment",
+                  "documents": ["amendment-3"]},
+        )
+        self.assertEqual(stale.status_code, 409)
+
+        # Resolve the fresh review issue; duplicate key + same payload replays.
+        snap2 = self.client.get(f"/api/cases/{case_id}/snapshot")
+        bundle2 = snap2.json()["revision"]["input_bundle_hash"]
+        issue_id = f"{case_id}-{rev2}-evidence-1"
+        payload = {"revision_id": rev2, "expected_bundle_hash": bundle2,
+                   "decision_kind": "accept_evidence", "rationale": "verified",
+                   "evidence_refs": ["doc:amendment-2"], "idempotency_key": "key-1"}
+        first = self.client.post(f"/api/review-issues/{issue_id}/resolve", json=payload)
+        self.assertEqual(first.status_code, 200)
+        replay = self.client.post(f"/api/review-issues/{issue_id}/resolve", json=payload)
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.json(), first.json())
+
+        # Same key + different payload -> conflict.
+        clash = dict(payload, rationale="changed mind")
+        conflict = self.client.post(f"/api/review-issues/{issue_id}/resolve", json=clash)
+        self.assertEqual(conflict.status_code, 409)
+
+        # Stale resolve against old revision/bundle -> 409.
+        old_issue = f"{case_id}-evidence-1"
+        stale_resolve = self.client.post(
+            f"/api/review-issues/{old_issue}/resolve",
+            json={"revision_id": rev1, "expected_bundle_hash": bundle1,
+                  "decision_kind": "accept_evidence", "rationale": "late",
+                  "evidence_refs": [], "idempotency_key": "key-2"},
+        )
+        self.assertEqual(stale_resolve.status_code, 409)
+
+        # Officer approval binds to the exact current package hash.
+        snap3 = self.client.get(f"/api/cases/{case_id}/snapshot")
+        package_hash = snap3.json()["package_hash"]
+        approval = self.client.post(
+            f"/api/cases/{case_id}/officer-approval",
+            json={"revision_id": rev2, "package_hash": package_hash,
+                  "actor": "officer-1", "role": "officer",
+                  "decision": "approved", "reason": "reviewed"},
+        )
+        self.assertEqual(approval.status_code, 200)
+
+        # Old approval cannot authorize the next revision.
+        created2 = self.client.post(
+            f"/api/cases/{case_id}/revisions",
+            json={"expected_parent_revision": rev2, "change_kind": "amendment",
+                  "documents": ["amendment-3"]},
+        )
+        rev3 = created2.json()["revision_id"]
+        reused = self.client.post(
+            f"/api/cases/{case_id}/officer-approval",
+            json={"revision_id": rev2, "package_hash": package_hash,
+                  "actor": "officer-1", "role": "officer",
+                  "decision": "approved", "reason": "reused"},
+        )
+        self.assertEqual(reused.status_code, 409)
+        wrong_hash = self.client.post(
+            f"/api/cases/{case_id}/officer-approval",
+            json={"revision_id": rev3, "package_hash": "deadbeef",
+                  "actor": "officer-1", "role": "officer",
+                  "decision": "approved", "reason": "wrong hash"},
+        )
+        self.assertEqual(wrong_hash.status_code, 409)
+
 
 if __name__ == "__main__":
     unittest.main()
