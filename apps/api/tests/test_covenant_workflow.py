@@ -135,6 +135,60 @@ class CovenantWorkflowTests(unittest.TestCase):
             list(range(1, len(result.trace) + 1)),
         )
 
+    def test_full_checklist_flags_interest_coverage_unsupported(self):
+        result = self.workflow.run("aurora-net-leverage")
+
+        statuses = {a.rule_id: a.status for a in result.covenant_results}
+        self.assertEqual(statuses["aurora-max-net-leverage"], "pass")
+        self.assertIsNotNone(result.coverage)
+        self.assertEqual(result.coverage.status, "incomplete")
+        self.assertIn("aurora-max-net-leverage", result.coverage.assessed[0])
+        self.assertTrue(
+            any("Interest coverage" in item for item in result.coverage.excluded)
+        )
+        self.assertIn("not full agreement compliance", result.status_reason.lower())
+
+    def test_pass_never_labelled_full_compliance(self):
+        result = self.workflow.run("aurora-net-leverage")
+
+        self.assertEqual(result.status, DraftStatus.COMPLIANT)
+        self.assertIn("not full agreement compliance", result.status_reason.lower())
+
+    def test_empty_evaluated_set_cannot_pass(self):
+        cases = build_demo_catalog()
+        case = cases["aurora-net-leverage"]
+        case.rule.supported = False
+        case.rule.unsupported_reason = "No calculator for this rule in v1."
+        workflow = CovenantWorkflow(InMemoryRepository(cases))
+
+        result = workflow.run("aurora-net-leverage")
+
+        self.assertEqual(result.status, DraftStatus.REVIEW)
+        self.assertTrue(
+            any(issue.code == "NO_EVALUATED_COVENANTS" for issue in result.review_issues)
+        )
+
+    def test_failure_preserved_beside_indeterminate_sibling(self):
+        from copy import deepcopy
+
+        cases = build_demo_catalog()
+        case = cases["beacon-gross-leverage"]
+        extra = deepcopy(case.rule)
+        extra.id = "beacon-extra-liquidity"
+        extra.name = "Minimum Liquidity"
+        extra.denominator_keys = ["nonexistent_liquidity_fact"]
+        case.extra_rules = [extra]
+        workflow = CovenantWorkflow(InMemoryRepository(cases))
+
+        result = workflow.run("beacon-gross-leverage")
+        kinds = {a.status for a in result.covenant_results}
+
+        self.assertIn("fail", kinds)
+        self.assertIn("indeterminate", kinds)
+        # Computed failure survives: either breach, or review held by the
+        # indeterminate sibling's blocking issue — never a pass.
+        self.assertIn(result.status, (DraftStatus.BREACH, DraftStatus.REVIEW))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -438,6 +438,10 @@ def build_aon_term_loan_case(raw_dir: Path | None = None) -> CovenantCase:
             active=True,
         ),
         facts=[financial_fact(extracted) for extracted in extracted_facts],
+        unsupported_obligations=[
+            "Interest coverage ratio — out of scope for v1; "
+            "detected but not calculated.",
+        ],
         risk_note=(
             "Period mismatch: the fiscal-2023 financials antedate the first "
             "Q1-2024 measurement period, and the 10-K total-debt line proxies "

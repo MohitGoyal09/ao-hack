@@ -24,6 +24,10 @@ from .ingestion import AON_CASE_ID, build_aon_term_loan_case
 
 PERIOD = "Trailing twelve months ended 2026-06-30"
 
+INTEREST_COVERAGE_UNSUPPORTED = (
+    "Interest coverage ratio — out of scope for v1; detected but not calculated."
+)
+
 
 def _document(
     document_id: str,
@@ -154,6 +158,7 @@ def build_demo_catalog() -> dict[str, CovenantCase]:
             ),
             facts=deepcopy(COMMON_FACTS),
             risk_note="Contract-specific lease and cash definitions drive this result.",
+            unsupported_obligations=[INTEREST_COVERAGE_UNSUPPORTED],
         ),
         CovenantCase(
             id="beacon-gross-leverage",
@@ -203,6 +208,7 @@ def build_demo_catalog() -> dict[str, CovenantCase]:
             ),
             facts=deepcopy(COMMON_FACTS),
             risk_note="The agreement-defined 4.17x result exceeds the 4.00x limit.",
+            unsupported_obligations=[INTEREST_COVERAGE_UNSUPPORTED],
         ),
         CovenantCase(
             id="beacon-amendment",
@@ -259,6 +265,7 @@ def build_demo_catalog() -> dict[str, CovenantCase]:
                 ],
             ),
             facts=deepcopy(COMMON_FACTS),
+            unsupported_obligations=[INTEREST_COVERAGE_UNSUPPORTED],
             amendment_note=(
                 "Amendment No. 2 controls this quarter; the original 4.00x term is superseded."
             ),
@@ -347,6 +354,7 @@ def build_demo_catalog() -> dict[str, CovenantCase]:
             risk_note=(
                 "Candidate arithmetic may be shown, but the conclusion is held pending evidence."
             ),
+            unsupported_obligations=[INTEREST_COVERAGE_UNSUPPORTED],
         ),
     ]
     catalog = {case.id: case for case in cases}

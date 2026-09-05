@@ -11,7 +11,12 @@ from decimal import Decimal, ROUND_HALF_UP
 from .domain import (
     CalculationLine,
     CalculationResult,
+    CovenantAssessment,
     CovenantCase,
+    CovenantResultStatus,
+    CovenantRule,
+    CoverageReport,
+    CoverageStatus,
     ReviewerDecision,
     ReviewIssue,
 )
@@ -26,6 +31,114 @@ def _rounded(value: Decimal) -> float:
 
 class CovenantCalculator:
     """Evaluate one contract-compiled rule against its financial fact set."""
+
+    def evaluate_all(
+        self, case: CovenantCase, decision: ReviewerDecision
+    ) -> tuple[list[CovenantAssessment], CoverageReport, list[ReviewIssue]]:
+        """Run the FULL applicable rule list; unsupported items are flagged, never omitted."""
+        assessments: list[CovenantAssessment] = []
+        issues: list[ReviewIssue] = []
+        assessed: list[str] = []
+        excluded: list[str] = list(case.unsupported_obligations)
+        for rule in case.all_rules():
+            if not rule.supported:
+                assessments.append(
+                    CovenantAssessment(
+                        rule_id=rule.id,
+                        rule_name=rule.name,
+                        status=CovenantResultStatus.UNSUPPORTED,
+                        detail=rule.unsupported_reason
+                        or "Calculation not supported in v1.",
+                    )
+                )
+                excluded.append(f"{rule.name} ({rule.id}): unsupported")
+                continue
+            if not rule.active:
+                assessments.append(
+                    CovenantAssessment(
+                        rule_id=rule.id,
+                        rule_name=rule.name,
+                        status=CovenantResultStatus.NOT_APPLICABLE,
+                        detail="Rule is not active for this test period.",
+                    )
+                )
+                excluded.append(f"{rule.name} ({rule.id}): not applicable this period")
+                continue
+            single_case = case.model_copy(update={"rule": rule})
+            calculation, rule_issues = self.calculate(single_case, decision)
+            issues.extend(rule_issues)
+            blocking_for_rule = [
+                i
+                for i in rule_issues
+                if i.severity == "blocking"
+                and i.code in ("MISSING_FINANCIAL_FACT", "ZERO_DENOMINATOR")
+            ]
+            if calculation.passed is True:
+                assessments.append(
+                    CovenantAssessment(
+                        rule_id=rule.id,
+                        rule_name=rule.name,
+                        status=CovenantResultStatus.PASS,
+                        detail=(
+                            f"Ratio {calculation.ratio:.2f}x satisfies "
+                            f"{calculation.comparator} {calculation.threshold:.2f}x "
+                            "for the declared supported scope only; "
+                            "not full agreement compliance."
+                        ),
+                        ratio=calculation.ratio,
+                        threshold=calculation.threshold,
+                        passed=True,
+                    )
+                )
+            elif calculation.passed is False:
+                assessments.append(
+                    CovenantAssessment(
+                        rule_id=rule.id,
+                        rule_name=rule.name,
+                        status=CovenantResultStatus.FAIL,
+                        detail=(
+                            f"Ratio {calculation.ratio:.2f}x breaches "
+                            f"{calculation.comparator} {calculation.threshold:.2f}x."
+                        ),
+                        ratio=calculation.ratio,
+                        threshold=calculation.threshold,
+                        passed=False,
+                    )
+                )
+            else:
+                assessments.append(
+                    CovenantAssessment(
+                        rule_id=rule.id,
+                        rule_name=rule.name,
+                        status=CovenantResultStatus.INDETERMINATE,
+                        detail="; ".join(i.message for i in blocking_for_rule)
+                        or "No decisionable ratio.",
+                        ratio=calculation.ratio,
+                        threshold=calculation.threshold,
+                        passed=None,
+                    )
+                )
+            assessed.append(f"{rule.name} ({rule.id})")
+        evaluated = [
+            a
+            for a in assessments
+            if a.status in (CovenantResultStatus.PASS, CovenantResultStatus.FAIL)
+        ]
+        if not evaluated:
+            coverage_status = CoverageStatus.INCOMPLETE
+            note = "Empty set of evaluated covenants cannot pass."
+        elif excluded:
+            coverage_status = CoverageStatus.INCOMPLETE
+            note = (
+                "Declared supported scope assessed; "
+                f"{len(excluded)} obligation(s) excluded — see excluded list."
+            )
+        else:
+            coverage_status = CoverageStatus.COMPLETE
+            note = "All declared obligations assessed."
+        return assessments, CoverageReport(
+            status=coverage_status, assessed=assessed, excluded=excluded, note=note
+        ), issues
 
     def calculate(
         self, case: CovenantCase, decision: ReviewerDecision
