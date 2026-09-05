@@ -1,7 +1,7 @@
 services:
   litellm:
     build:
-      context: ./infra/litellm
+      context: ./apps/api/litellm
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}

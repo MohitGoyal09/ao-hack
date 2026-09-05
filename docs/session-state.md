@@ -23,7 +23,7 @@ Repo: https://github.com/MohitGoyal09/ao-hack.git
 - Chat helper (`src/agent.py`). Two tools only: list cases, run calculator.
   Fixed offline script when no model key is set.
 - Login plus file saving to Supabase, private bucket, access rules
-  (`src/platform/supabase.py`, `supabase/migrations/202609050001_covenant_certificate.sql`).
+  (`src/platform/supabase.py`, `apps/api/supabase/migrations/202609050001_covenant_certificate.sql`).
 - Redacted Neatlogs tracing (`src/platform/observability.py`). IDs only.
 - Next.js thin UI (`apps/web/src/app/page.tsx`). Four practice cases, run,
   approve/reject buttons, proof list, clause list, trace list, CopilotChat.

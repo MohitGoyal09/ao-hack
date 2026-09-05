@@ -51,7 +51,7 @@ docker compose up --build
 
 Open <http://localhost:3000>. The API health endpoint is <http://localhost:8123/health>.
 
-No model key, database, or Supabase project is needed for the curated demonstration cases. Copy `.env.example` to `.env` when enabling the production integrations. Apply `supabase/migrations/202609050001_covenant_certificate.sql` to provision the tables, row-level security policies, and private artifact bucket. The repository also includes an optional LiteLLM proxy configuration for controlled provider routing when a model-backed copilot is enabled; without a model key, the copilot uses its deterministic offline LangGraph path.
+No model key, database, or Supabase project is needed for the curated demonstration cases. Copy `.env.example` to `.env` when enabling the production integrations. Apply `apps/api/supabase/migrations/202609050001_covenant_certificate.sql` to provision the tables, row-level security policies, and private artifact bucket. The repository also includes an optional LiteLLM proxy configuration for controlled provider routing when a model-backed copilot is enabled; without a model key, the copilot uses its deterministic offline LangGraph path.
 
 ## API
 
@@ -93,11 +93,11 @@ AO was used from the beginning to coordinate independent research and implementa
 ```text
 apps/web        Next.js control-room UI and server-side API proxy
 apps/api        FastAPI, LangGraph, agent, platform adapters, and Python covenant core
+apps/api/litellm  optional LiteLLM proxy configuration (Gemini)
+apps/api/supabase Postgres, RLS, Auth, and private Storage migration
 data            curated SEC/PDF/XLSX demonstration corpus
 docs            domain research, architecture, plans, and primary-source controls brief
-infra           optional LiteLLM proxy configuration
 references      read-only upstream integration/design references
-supabase        Postgres, RLS, Auth, and private Storage migration
 ```
 
 ## Production next steps
