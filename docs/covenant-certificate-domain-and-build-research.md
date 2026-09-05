@@ -1,5 +1,7 @@
 # Covenant Certificate: Domain and Build Research
 
+> Correction 2026-09-05: this is exploratory research, not verified gold domain data. Follow `docs/implementation-contract.md` and `data/case-readiness.json` for current scope and source limitations. Historical claims about complete cases, certificate availability or held-out performance must not be inferred from this research. Comparative demonstrations across unrelated borrowers are hypothetical.
+
 Date: 2026-09-04
 
 Status: research decision for Syndicate by Maximor, Track 2

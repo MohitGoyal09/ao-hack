@@ -10,11 +10,13 @@
 
 **Spec:** `docs/covenant-certificate-backend-architecture.md`
 
+**Controlling revision:** `docs/implementation-contract.md`. Revision-aware results, declared coverage and server-authorized review take precedence over the earlier starter behavior. This is an implementation plan; no UI has yet been verified.
+
 ## Visual direction
 
 Use an institutional forensic-ledger style: warm off-white document surfaces, graphite navigation, restrained blue for evidence, amber for review, red for breach, and green only for proved compliance. Use a readable sans face for interface text and tabular numerals for calculations. Avoid generic gradients, floating chatbot cards, decorative glass, and card grids with equal visual weight.
 
-The memorable moment is a split agreement comparison where one definition branch changes the same financial packet from pass to breach.
+The main demonstration shows an amendment or financial update changing a case, the affected evidence path, an exception resolved by a human, and a revised draft package. The two-agreement view is a secondary, clearly labelled hypothetical comparison when contracts do not govern the same borrower.
 
 ## Task 1: Remove the starter demo and establish the design system
 
@@ -29,6 +31,7 @@ The memorable moment is a split agreement comparison where one definition branch
 - [ ] Create a three-region desktop shell: case rail, central workbench, review/activity rail.
 - [ ] Create a compact mobile layout with case drawer and review bottom sheet.
 - [ ] Add case states, document counts, test period, and last activity to the case rail.
+- [ ] Display run state, per-covenant result, assessed/unsupported scope and package approval separately. A failed supported test remains visible even when the package has other unresolved issues.
 - [ ] Preserve a visible connection and processing state without exposing raw chain-of-thought.
 - [ ] Test 375, 768, 1024, and 1440 pixel widths.
 - [ ] Commit `feat: add covenant case workspace shell`.
@@ -46,6 +49,7 @@ The memorable moment is a split agreement comparison where one definition branch
 
 - [ ] Define frontend types for case, document, covenant, definition node, fact, calculation, review issue, certificate, and event.
 - [ ] Map AG-UI events to a reducer with sequence and replay protection.
+- [ ] Use revision IDs and a snapshot cursor. Ignore stale events for the active revision, retain them in history, and show old results as stale until the backend publishes a validated new result. Custom application events use AG-UI custom envelopes.
 - [ ] Render named work stages: Documents, Policy, Evidence, Calculation, Control Review, Officer Review.
 - [ ] Support reconnect from last event sequence and distinguish retryable connection failure from case failure.
 - [ ] Commit `feat: stream covenant case state`.
@@ -76,15 +80,26 @@ The memorable moment is a split agreement comparison where one definition branch
 - [ ] Display before and after calculations when a decision changes the result.
 - [ ] Add a separate officer approval screen for the completed draft.
 - [ ] Test authorization, double submission, stale decision, reconnect, rejection, and resumed workflow.
+- [ ] Submit issue ID, revision ID, expected hash and idempotency key; on HTTP 409 refresh the issue and require renewed review. Never set an approved result optimistically from client shared state.
 - [ ] Commit `feat: add finance review controls`.
 
-## Task 8: Build the signature demo comparison
+## Task 8: Build the change-and-recheck demonstration
+
+**Files:** create `apps/web/src/components/revisions/RevisionTimeline.tsx`, `ImpactPanel.tsx`, `ResultDiff.tsx`, and `apps/web/src/lib/cases/revision-state.ts`; test in `apps/web/src/lib/cases/revision-state.test.ts` and `apps/web/e2e/recheck.spec.ts`.
+
+- [ ] Open a saved case, attach an applicable amendment or corrected financial packet, and create a new revision through the backend command.
+- [ ] Highlight changed clauses and affected calculations. Show a historical result with a stale label while rerun is pending, never a premature green pass.
+- [ ] Resolve a missing-evidence issue, wait for recalculation, and preview the revised package. Show invalidated prior approval and require approval for the new hash.
+- [ ] Test wrong-facility amendment, newly added unsupported covenant, failed recalculation, stale review response, reconnect and rapid repeated upload.
+
+### Secondary comparison view
 
 - [ ] Create split Agreement A and Agreement B columns over one shared financial packet.
 - [ ] Synchronize scrolling and highlight only the definition branches that differ.
 - [ ] Animate the result change after both deterministic calculations complete.
 - [ ] Show the deciding clause, not agent narration, as the final visual focus.
 - [ ] Provide a stable seeded demo route that never depends on live search.
+- [ ] Label recorded playback as playback, generated fixtures as synthetic and cross-borrower applications as hypothetical. Fixture selection must not hard-code the actual live result.
 - [ ] Commit `feat: add agreement comparison demo`.
 
 ## Task 9: Build certificate and evidence-package preview
@@ -93,6 +108,7 @@ The memorable moment is a split agreement comparison where one definition branch
 - [ ] Add tabs for certificate, calculation schedule, evidence manifest, approvals, and audit events.
 - [ ] Allow signed URL download only after backend authorization.
 - [ ] Show artifact hash and version when a source or decision changes.
+- [ ] Distinguish unsigned approved drafts from signed documents. List missing form sections and required officer statements; an exhibit reference alone does not supply a template.
 - [ ] Commit `feat: preview covenant certificate package`.
 
 ## Task 10: Complete accessibility, error, and visual QA
@@ -108,7 +124,7 @@ The memorable moment is a split agreement comparison where one definition branch
 ## Frontend acceptance gate
 
 - A judge understands the input, definition difference, calculation, result, and human boundary without reading chat.
-- The same financial packet visibly produces two different contract outcomes.
+- The primary demo completes update -> impact -> evidence review -> recalculation -> revised draft. A secondary comparison labels hypothetical outcomes clearly.
 - Every displayed number opens its source.
 - Missing evidence blocks the result and creates a clear review action.
 - No raw chain-of-thought, secret, or private document body appears in operational logs.

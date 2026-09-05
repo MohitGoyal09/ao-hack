@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "assessed_at": "2026-09-05",
+  "status": "component_sources_available_full_verdict_not_ready",
+  "labels_status": "no_expert_reviewed_gold",
+  "holdout_status": "new_agreement_family_required",
+  "packages": [
+    {
+      "id": "aon-2024",
+      "facility": "2024 term loan",
+      "usage": [
+        "definition_extraction",
+        "threshold_schedule",
+        "period_mismatch"
+      ],
+      "full_verdict_ready": false,
+      "gaps": [
+        "Verify closing date and first applicable test date",
+        "Obtain matching period financials and adjustment support",
+        "Verify governing amendments for test date",
+        "Locate actual certificate form body"
+      ],
+      "source_financial_period": "2023 annual; precedes selected agreement"
+    },
+    {
+      "id": "citizens-2021",
+      "facility": "2021 Regions Bank credit agreement",
+      "usage": [
+        "pdf_parsing",
+        "definition_extraction",
+        "period_mismatch"
+      ],
+      "full_verdict_ready": false,
+      "gaps": [
+        "Resolve original SEC exhibit provenance",
+        "Obtain applicable period financials after agreement activation",
+        "Verify certificate body and current chain"
+      ],
+      "source_financial_period": "2021 Q1; precedes May 2021 agreement"
+    },
+    {
+      "id": "disney-2024",
+      "facility": "2024 364-day credit agreement",
+      "usage": [
+        "definition_extraction",
+        "unsupported_covenant_detection"
+      ],
+      "full_verdict_ready": false,
+      "gaps": [
+        "Interest coverage calculation is deferred",
+        "Obtain compatible test-period data and governing package"
+      ],
+      "source_financial_period": "2023 annual; precedes selected agreement"
+    },
+    {
+      "id": "celanese-revolver",
+      "facility": "revolving facility",
+      "document": "raw/sec/celanese/2024-second-amendment-revolving.html",
+      "usage": [
+        "amendment_classification",
+        "threshold_table",
+        "wrong_facility_rejection"
+      ],
+      "full_verdict_ready": false,
+      "gaps": [
+        "Original revolving agreement",
+        "Prior revolving amendments",
+        "Applicable financial evidence",
+        "Certificate form and reviewed labels"
+      ]
+    },
+    {
+      "id": "celanese-term-loan",
+      "facility": "March 18 2022 term loan",
+      "document": "raw/sec/celanese/2024-third-amendment-term-loan.html",
+      "usage": [
+        "amendment_classification",
+        "threshold_table",
+        "wrong_facility_rejection"
+      ],
+      "full_verdict_ready": false,
+      "gaps": [
+        "Original term loan",
+        "First and second term-loan amendments",
+        "Applicable financial evidence",
+        "Certificate form and reviewed labels"
+      ]
+    }
+  ],
+  "first_steps": [
+    "Start backend shell and dataset annotation in parallel",
+    "Select one coherent facility and test date",
+    "Review extraction labels before evaluating compiler",
+    "Complete calculation evidence before asserting issuer verdict",
+    "Exercise changed-input invalidation and revision-bound review"
+  ]
+}

@@ -1,5 +1,7 @@
 # Covenant Certificate Backend Architecture
 
+> Revision 2026-09-05: `docs/implementation-contract.md` controls implementation wherever this original design differs. It adds dataset readiness, update/recheck, immutable case revisions, stale-approval invalidation, durable jobs, scoped results and precise draft finalization. Read it first; the original sections below retain background detail.
+
 Date: 2026-09-04
 
 Status: proposed architecture, ready for approval before implementation

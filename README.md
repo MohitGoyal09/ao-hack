@@ -1,6 +1,8 @@
 # Covenant Certificate
 
-**Track 2 — Autonomous Office of the CFO** entry for Syndicate by Maximor.
+**Track 2 - Autonomous Office of the CFO** entry for Syndicate by Maximor.
+
+Start implementation with [the current implementation contract](docs/implementation-contract.md), then the [backend plan](docs/superpowers/plans/2026-09-04-covenant-certificate-backend.md). The product prepares covenant reporting, rechecks changed inputs, resolves evidence exceptions, and produces a revised draft for officer review. [Dataset readiness](data/case-readiness.json) records the remaining evidence gaps; the current corpus is not yet a complete gold certification package.
 
 Covenant Certificate is an evidence-first treasury workflow for preparing an officer-reviewed *draft* loan-covenant compliance certificate. It turns contract-specific rules and financial evidence into a cited, deterministic result. It does not give legal advice and never represents an AI result as a signed certificate.
 
