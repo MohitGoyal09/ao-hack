@@ -26,7 +26,8 @@ class CovenantApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["status"], "DRAFT_BREACH")
-        self.assertEqual(body["calculation"]["ratio"], 4.17)
+        self.assertEqual(body["calculation"]["ratio"], "4.17")
+        self.assertIsInstance(body["calculation"]["ratio"], str)
         self.assertEqual(body["runtime"]["orchestrator"], "langgraph")
         self.assertGreaterEqual(len(body["trace"]), 7)
 
