@@ -23,6 +23,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.agent import build_agent_graph
 from src.covenant import RunRequest, UnknownCaseError, build_demo_workflow
+from src.covenant.revisions import (
+    IdempotencyConflictError,
+    StaleCommandError,
+    UnknownRevisionError,
+    store as revision_store,
+)
 from src.platform.supabase import (
     AuthenticationError,
     PersistenceError,
@@ -33,6 +39,21 @@ from src.platform.supabase import (
 workflow = build_demo_workflow()
 platform = SupabasePlatform.from_env()
 agent_graph = build_agent_graph(workflow)
+
+
+def _ensure_revisions(case_id: str) -> None:
+    try:
+        case = workflow._repository.get_case(case_id)  # noqa: SLF001
+    except UnknownCaseError:
+        raise HTTPException(status_code=404, detail="Unknown covenant case")
+    revision_store.ensure_case(
+        case_id=case.id,
+        test_date=case.test_date,
+        rule_id=case.rule.id,
+        threshold=case.rule.threshold,
+        doc_ids=[d.id for d in case.documents],
+        fact_keys=[f.key for f in case.facts],
+    )
 
 
 @asynccontextmanager
@@ -126,6 +147,102 @@ async def case_history(
         return workflow.history(case_id)
     except UnknownCaseError as error:
         raise HTTPException(status_code=404, detail="Unknown covenant case") from error
+
+
+@app.post("/api/cases/{case_id}/revisions")
+async def create_revision(case_id: str, body: dict) -> dict:
+    _ensure_revisions(case_id)
+    try:
+        rev, changeset, impact = revision_store.create_revision(
+            case_id=case_id,
+            expected_parent=str(body.get("expected_parent_revision", "")),
+            change_kind=str(body.get("change_kind", "amendment")),
+            documents=list(body.get("documents", [])),
+            facts=list(body.get("facts", [])),
+            new_threshold=body.get("new_threshold"),
+        )
+    except UnknownRevisionError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except StaleCommandError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {
+        "revision_id": rev.revision_id,
+        "revision": rev.model_dump(mode="json"),
+        "changeset": changeset.model_dump(mode="json"),
+        "impact_pending": impact.model_dump(mode="json"),
+    }
+
+
+@app.get("/api/cases/{case_id}/revisions/{revision_id}/impact")
+async def revision_impact(case_id: str, revision_id: str) -> dict:
+    _ensure_revisions(case_id)
+    try:
+        rev = revision_store.get(case_id, revision_id)
+        impact = revision_store.impact(case_id, revision_id)
+    except UnknownRevisionError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {
+        "revision_id": rev.revision_id,
+        "changed_inputs": impact.changed_definitions,
+        "affected_rule_ids": impact.affected_rule_ids,
+        "stale_artifact_ids": impact.stale_artifact_ids,
+        "review_requirements": impact.review_requirements,
+        "impact": impact.model_dump(mode="json"),
+    }
+
+
+@app.post("/api/review-issues/{issue_id}/resolve")
+async def resolve_issue(issue_id: str, body: dict) -> dict:
+    try:
+        return revision_store.resolve_issue(
+            issue_id=issue_id,
+            revision_id=str(body.get("revision_id", "")),
+            expected_bundle_hash=str(body.get("expected_bundle_hash", "")),
+            decision_kind=str(body.get("decision_kind", "accept_evidence")),
+            rationale=str(body.get("rationale", "")),
+            evidence_refs=list(body.get("evidence_refs", [])),
+            idempotency_key=str(body.get("idempotency_key", "")),
+            actor=str(body.get("actor", "reviewer")),
+        )
+    except UnknownRevisionError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except StaleCommandError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except IdempotencyConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/api/cases/{case_id}/officer-approval")
+async def officer_approval(case_id: str, body: dict) -> dict:
+    _ensure_revisions(case_id)
+    try:
+        binding = revision_store.approve(
+            case_id=case_id,
+            revision_id=str(body.get("revision_id", "")),
+            package_hash=str(body.get("package_hash", "")),
+            actor=str(body.get("actor", "officer")),
+            role=str(body.get("role", "officer")),
+            decision=body.get("decision", "approved"),
+            reason=str(body.get("reason", "")),
+        )
+    except UnknownRevisionError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except StaleCommandError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return binding.model_dump(mode="json")
+
+
+@app.get("/api/cases/{case_id}/snapshot")
+async def case_snapshot(case_id: str) -> dict:
+    _ensure_revisions(case_id)
+    try:
+        return revision_store.snapshot(case_id)
+    except UnknownRevisionError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 add_langgraph_fastapi_endpoint(
