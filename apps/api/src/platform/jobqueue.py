@@ -415,6 +415,45 @@ def configured_database_url() -> str | None:
     return dsn or None
 
 
+def _postgres_saver_class():
+    """``PostgresSaver`` whose async methods run the sync ones in worker threads.
+
+    The AG-UI agent drives the graph with ``astream_events``; the sync saver's
+    ``a*`` methods raise ``NotImplementedError`` (that is what
+    ``AsyncPostgresSaver`` is for, but it needs a running event loop at
+    construction and this runtime is built at import). psycopg connections
+    are thread-safe and ``PostgresSaver`` serializes cursor use with its own
+    lock, so delegating through ``asyncio.to_thread`` is safe.
+    """
+    import asyncio
+
+    from langgraph.checkpoint.postgres import PostgresSaver
+
+    class AsyncCapablePostgresSaver(PostgresSaver):
+        async def aget_tuple(self, config):
+            return await asyncio.to_thread(self.get_tuple, config)
+
+        async def alist(self, config, *, filter=None, before=None, limit=None):
+            items = await asyncio.to_thread(
+                lambda: list(self.list(config, filter=filter, before=before, limit=limit))
+            )
+            for item in items:
+                yield item
+
+        async def aput(self, config, checkpoint, metadata, new_versions):
+            return await asyncio.to_thread(
+                self.put, config, checkpoint, metadata, new_versions
+            )
+
+        async def aput_writes(self, config, writes, task_id, task_path=""):
+            await asyncio.to_thread(self.put_writes, config, writes, task_id, task_path)
+
+        async def adelete_thread(self, thread_id):
+            await asyncio.to_thread(self.delete_thread, thread_id)
+
+    return AsyncCapablePostgresSaver
+
+
 def _verify_checkpoint_schema(saver: Any) -> None:
     """Perform a read-only checkpoint query; setup is an operator action.
 
@@ -458,9 +497,7 @@ def build_durability_runtime(dsn: str | None = None) -> DurabilityRuntime:
     saver: Any | None = None
     saver_context: Any | None = None
     try:
-        from langgraph.checkpoint.postgres import PostgresSaver
-
-        saver_context = PostgresSaver.from_conn_string(dsn)
+        saver_context = _postgres_saver_class().from_conn_string(dsn)
         saver = saver_context.__enter__()
         _verify_checkpoint_schema(saver)
         checkpoint_status = DurabilityComponentStatus(

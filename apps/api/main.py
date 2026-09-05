@@ -895,10 +895,24 @@ async def cancel_job(
     return {"job_id": cancelled.id, "state": cancelled.state}
 
 
+class CovenantAGUIAgent(LangGraphAGUIAgent):
+    """ag-ui-langgraph 0.0.43 ``clone()`` forwards kwargs copilotkit 0.1.96's
+    ``__init__`` does not accept (``enable_legacy_on_interrupt_event`` ...), so
+    every ``POST /ag-ui`` 500s. Clone with the four kwargs the subclass takes."""
+
+    def clone(self):
+        return type(self)(
+            name=self.name,
+            graph=self.graph,
+            description=self.description,
+            config=dict(self.config) if self.config else None,
+        )
+
+
 if agent_graph is not None:
     add_langgraph_fastapi_endpoint(
         app=app,
-        agent=LangGraphAGUIAgent(
+        agent=CovenantAGUIAgent(
             name="covenant_agent",
             description="Evidence-grounded treasury copilot for covenant review.",
             graph=agent_graph,

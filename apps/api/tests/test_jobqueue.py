@@ -109,6 +109,31 @@ class JobQueueTest(unittest.TestCase):
         runtime.close()
         context.__exit__.assert_called_once()
 
+    def test_postgres_saver_async_methods_delegate_to_sync(self):
+        """The AG-UI agent runs the graph async; the sync saver must not raise."""
+        import asyncio
+
+        from src.platform.jobqueue import _postgres_saver_class
+
+        saver = _postgres_saver_class()(MagicMock())
+        saver.get_tuple = MagicMock(return_value="tuple")
+        saver.put = MagicMock(return_value={"configurable": {}})
+        saver.put_writes = MagicMock()
+        saver.list = MagicMock(return_value=iter(["a", "b"]))
+
+        async def exercise():
+            got = await saver.aget_tuple({"configurable": {"thread_id": "t"}})
+            put = await saver.aput({"configurable": {}}, {}, {}, {})
+            await saver.aput_writes({"configurable": {}}, [], "task")
+            listed = [item async for item in saver.alist(None, limit=2)]
+            return got, put, listed
+
+        got, put, listed = asyncio.run(exercise())
+        self.assertEqual(got, "tuple")
+        self.assertEqual(put, {"configurable": {}})
+        self.assertEqual(listed, ["a", "b"])
+        saver.put_writes.assert_called_once()
+
     def test_agent_graph_compiles_with_durable_checkpointer(self):
         with patch.dict("os.environ", {}, clear=True):
             graph = build_agent_graph(
