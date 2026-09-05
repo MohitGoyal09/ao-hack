@@ -53,6 +53,12 @@ Open <http://localhost:3000>. The API health endpoint is <http://localhost:8123/
 
 No model key, database, or Supabase project is needed for the curated demonstration cases. Copy `.env.example` to `.env` when enabling the production integrations. Apply `apps/api/supabase/migrations/202609050001_covenant_certificate.sql` to provision the tables, row-level security policies, and private artifact bucket. The repository also includes an optional LiteLLM proxy configuration for controlled provider routing when a model-backed copilot is enabled; without a model key, the copilot uses its deterministic offline LangGraph path.
 
+The hosted `ao-hack` Supabase project is linked and all repository migrations
+are applied. Team environment rules and safe public values are in
+[`docs/team-environment.md`](docs/team-environment.md), with separate frontend
+and backend templates under `config/team/`. Server keys and database passwords
+must stay in the team secret manager.
+
 ## API
 
 ```text

@@ -98,6 +98,9 @@ Fresh checks on 2026-09-05:
 | Backend tests | 39 of 39 passed |
 | Frontend | `npm ci` and production build passed |
 | Dependency audit | npm reported 19 issues: 6 low, 6 moderate, 7 high |
+| Supabase project | `ao-hack`, `ap-south-1`, active and linked |
+| Hosted migrations | all 4 local migrations match hosted history |
+| Database lint | local and hosted lint returned no schema errors |
 | Production readiness | not ready; real infrastructure E2E is missing |
 
 Run the baseline again instead of trusting these counts:
@@ -174,7 +177,15 @@ production agent workflow.
 ### Infrastructure
 
 - Supabase Auth validation and run artifact persistence adapters exist.
-- Migrations create the base schema, private bucket/RLS, and job queue table.
+- The hosted `ao-hack` Supabase project exists in `ap-south-1`.
+- Four applied migrations create 17 tenant-scoped workflow tables, the private
+  bucket, RLS policies, explicit Data API grants, and the durable job queue.
+- The fourth migration removes legacy user-folder Storage access, binds child
+  rows to same-tenant parents, narrows grants, validates approval hashes/numbers,
+  adds FK indexes, and protects append-only evidence and decision records.
+- The production schema now covers organizations, memberships, cases, immutable
+  document versions, revisions, document bundles, changes, impacts, rules,
+  financial facts, review issues/decisions, artifacts, approvals, and events.
 - Memory and Postgres job stores implement lease, retry, heartbeat, cancellation,
   and stale-worker fencing.
 - LangGraph has Postgres checkpoint code and an in-memory fallback.
@@ -204,12 +215,11 @@ production agent workflow.
 | P1 | No durable LangGraph interrupt/resume review | human review is REST state, not a paused agent execution |
 | P1 | Parser supports one Aon pattern | arbitrary agreements and amendment chains do not work |
 | P1 | No real Gemini/LiteLLM proof | tool calls, structured output, retries, cost data unverified |
-| P1 | No live Supabase integration test | RLS, restart, Storage, queue, checkpoints unproven |
+| P1 | Schema is hosted but backend repositories are not wired to it | hosted RLS, persistence, Storage, queue, and restart behavior are not yet E2E proven |
 | P1 | Frontend misses intake, revisions, event replay, full review inbox | production workflow cannot be completed in UI |
 | P2 | No untouched agreement family or final calculation labels | product accuracy is not measured |
 | P2 | No PDF workpaper export | certificate is a JSON draft object |
 | P2 | npm audit has 19 findings | must be triaged before a security claim |
-| P2 | `.env.example` has whitespace before `LITELLM_FAST_MODEL` | copied environment can behave unexpectedly |
 
 ## Target production flow
 
@@ -492,6 +502,7 @@ browser behavior, or deployment.
 
 ## First action
 
-Start Phase 1. Postgres queue/checkpoint code exists, but its runtime packages are
-not declared and configured failures can silently fall back to memory. Fix and
-test that before adding more features.
+Start Phase 1. The hosted schema is ready. Postgres queue/checkpoint code exists,
+but its runtime packages are not declared and configured failures can silently
+fall back to memory. Fix and test that, then wire the backend repositories to the
+new Supabase tables.
