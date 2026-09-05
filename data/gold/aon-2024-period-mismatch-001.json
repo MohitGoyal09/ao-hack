@@ -1,0 +1,32 @@
+{
+  "label_id": "aon-2024-period-mismatch-001",
+  "status": "REVIEWED",
+  "package_id": "aon-2024",
+  "review_scope": "extraction-only",
+  "claim": "The available Aon financial source covers fiscal year 2023 (10-K for year ended December 31, 2023), which precedes the February 2024 agreement; it cannot support a post-activation compliance verdict without period-matched financials.",
+  "source_spans": [
+    {
+      "source_path": "raw/sec/aon/2023-form-10k.html",
+      "anchor_text": "aon-20231231",
+      "note": "Filing identifier shows FY2023 coverage"
+    },
+    {
+      "source_path": "raw/sec/aon/2024-term-loan-credit-agreement.html",
+      "anchor_text": "\u201c Closing Date \u201d means the date on which the conditions precedent specified in Section 4.2 are satisfied",
+      "note": "Closing date is condition-based, not yet verified to a calendar date"
+    }
+  ],
+  "rationale": "Proposes a period-mismatch refusal label: verdict must be indeterminate/missing-period, not pass/fail.",
+  "proposed_by": "ao-hack-16 worker",
+  "proposed_at": "2026-09-05",
+  "needs_reviewer": true,
+  "not_a_verdict": true,
+  "review": {
+    "reviewer": "ao-hack-16 worker",
+    "review_date": "2026-09-05",
+    "review_scope": "extraction-only",
+    "rationale": "Proposes a period-mismatch refusal label: verdict must be indeterminate/missing-period, not pass/fail.",
+    "method": "Verified each anchor_text substring is present verbatim in the cited data/raw/ file; checked claim stays within extraction-only scope (no verdict, no test-date applicability).",
+    "verdict_claimed": false
+  }
+}

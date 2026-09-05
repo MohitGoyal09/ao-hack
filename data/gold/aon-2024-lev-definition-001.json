@@ -1,0 +1,27 @@
+{
+  "label_id": "aon-2024-lev-definition-001",
+  "status": "REVIEWED",
+  "package_id": "aon-2024",
+  "review_scope": "extraction-only",
+  "claim": "Agreement defines Consolidated Leverage Ratio as Consolidated Funded Debt at the last day of a Measurement Period divided by Consolidated Adjusted EBITDA for that Measurement Period.",
+  "source_spans": [
+    {
+      "source_path": "raw/sec/aon/2024-term-loan-credit-agreement.html",
+      "anchor_text": "\u201c Consolidated Leverage Ratio \u201d means, as of the last day of any Measurement Period, the ratio of Consolidated Funded Debt at such date to Consolidated Adjusted EBITDA for such Measurement Period",
+      "note": "Definition article"
+    }
+  ],
+  "rationale": "Proposes the ratio definition text only. Component definitions (Funded Debt, Adjusted EBITDA) are not yet extracted.",
+  "proposed_by": "ao-hack-16 worker",
+  "proposed_at": "2026-09-05",
+  "needs_reviewer": true,
+  "not_a_verdict": true,
+  "review": {
+    "reviewer": "ao-hack-16 worker",
+    "review_date": "2026-09-05",
+    "review_scope": "extraction-only",
+    "rationale": "Proposes the ratio definition text only. Component definitions (Funded Debt, Adjusted EBITDA) are not yet extracted.",
+    "method": "Verified each anchor_text substring is present verbatim in the cited data/raw/ file; checked claim stays within extraction-only scope (no verdict, no test-date applicability).",
+    "verdict_claimed": false
+  }
+}

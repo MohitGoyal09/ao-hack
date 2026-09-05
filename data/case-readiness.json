@@ -2,7 +2,15 @@
   "schema_version": 1,
   "assessed_at": "2026-09-05",
   "status": "component_sources_available_full_verdict_not_ready",
-  "labels_status": "no_expert_reviewed_gold",
+  "labels_status": "extraction_only_gold_reviewed_2026-09-05_no_verdict_labels",
+  "blockers": [
+    "locking sign-off pending (gap 5, concurrent worker, not merged at assessment time)",
+    "no coherent test-date package: closing evidence, matching-period financials, amendment chain, certificate body still missing per package",
+    "held-out set empty: new untouched agreement family still required"
+  ],
+  "unblocked_since_last_assessment": [
+    "rule checklist merged (gap 2) - no longer a blocker"
+  ],
   "holdout_status": "new_agreement_family_required",
   "packages": [
     {

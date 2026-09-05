@@ -7,8 +7,13 @@ Read `case-readiness.json` and `../docs/implementation-contract.md` first. No pa
 ## Rules
 
 - `raw/` is immutable source material. Do not edit these files.
-- `derived/` will contain normalized text, tables, page maps, and definition graphs.
-- `gold/` will contain expert-reviewed labels only.
+- `annotations/` holds proposed labels with status `PROPOSED`.
+- `gold/` holds reviewed labels only. Current scope is extraction-only
+  (10 labels reviewed 2026-09-05: threshold schedules, ratio definitions,
+  interest-coverage covenant text for unsupported-detection, period-mismatch
+  refusals, one synthetic wrong-facility test). No label claims a verdict.
+- `derived/` holds computed artifacts backing those labels (threshold tables,
+  definition maps, mismatch findings, split plan), traceable to `raw/`.
 - A public filing is evidence, not a gold answer.
 - Do not publish extracted legal conclusions as professional advice.
 - Recheck redistribution rights before making the repository public. The current repository is private.

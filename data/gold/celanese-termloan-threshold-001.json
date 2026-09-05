@@ -1,0 +1,32 @@
+{
+  "label_id": "celanese-termloan-threshold-001",
+  "status": "REVIEWED",
+  "package_id": "celanese-term-loan",
+  "review_scope": "extraction-only",
+  "claim": "The February 2024 third amendment (term loan) sets the same-form Financial Covenant schedule (5.75 down to 3.50) for the term-loan facility; it is a separate chain from the revolving second amendment.",
+  "source_spans": [
+    {
+      "source_path": "raw/sec/celanese/2024-third-amendment-term-loan.html",
+      "anchor_text": "Permit the Consolidated Leverage Ratio on the last day of any fiscal quarter of Holdings (each such date, a \u201c Test Date \u201d) to be greater than the ratio set forth below for such fiscal quarter (the \u201c Financial Covenant \u201d): Fiscal Quarter Ended Consolidated Leverage Ratio March 31, 2023 5.75:1.00 June 30, 2023 5.75:1.00 September 30, 2023 5.50:1.00 December 31, 2023 5.25:1.00 March 31, 2024 5.00:1.00 June 30, 2024 5.00:1.00 September 30, 2024 5.00:1.00 December 31, 2024 4.75:1.00 March 31, 2025 4.50:1.00 June 30, 2025 4.25:1.00 September 30, 2025 4.25:1.00 December 31, 2025 4.00:1.00 March 31, 2026 4.00:1.00 June 30, 2026 and each fiscal quarter ended thereafter 3.50:1.00",
+      "note": "Full threshold table"
+    },
+    {
+      "source_path": "raw/sec/celanese/2024-third-amendment-term-loan.html",
+      "anchor_text": "Third Amendment",
+      "note": "Facility identity: term-loan amendment 3"
+    }
+  ],
+  "rationale": "Proposes the term-loan threshold table text. Separate facility chain from celanese-revolver.",
+  "proposed_by": "ao-hack-16 worker",
+  "proposed_at": "2026-09-05",
+  "needs_reviewer": true,
+  "not_a_verdict": true,
+  "review": {
+    "reviewer": "ao-hack-16 worker",
+    "review_date": "2026-09-05",
+    "review_scope": "extraction-only",
+    "rationale": "Proposes the term-loan threshold table text. Separate facility chain from celanese-revolver.",
+    "method": "Verified each anchor_text substring is present verbatim in the cited data/raw/ file; checked claim stays within extraction-only scope (no verdict, no test-date applicability).",
+    "verdict_claimed": false
+  }
+}
