@@ -1,55 +1,41 @@
-import os
-import warnings
-from pathlib import Path
-from dotenv import load_dotenv
+"""Covenant Certificate's deliberately small, deterministic API."""
 
-# Load .env from the demo project root (one level up from agent/) BEFORE
-# importing src.agent — that import constructs ChatOpenAI at module load,
-# which needs OPENAI_API_KEY in the environment already.
-_demo_root = Path(__file__).parent.parent
-for env_path in (_demo_root / ".env", Path(".env")):
-    if env_path.is_file():
-        load_dotenv(env_path)
-        break
-else:
-    load_dotenv()
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi import FastAPI
-import uvicorn
-from src.agent import graph
-from copilotkit import LangGraphAGUIAgent
-from ag_ui_langgraph import add_langgraph_fastapi_endpoint
+from src.covenant import DEMO_CASES, RunRequest, case_summary, run_case
 
-app = FastAPI()
-
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
-
-
-add_langgraph_fastapi_endpoint(
-    app=app,
-    agent=LangGraphAGUIAgent(
-        name="sample_agent",
-        description="An example agent to use as a starting point for your own agent.",
-        graph=graph,
-    ),
-    path="/",
+app = FastAPI(title="Covenant Certificate API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 
-def main():
-    """Run the uvicorn server."""
-    port = int(os.getenv("PORT", "8123"))
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=port,
-        reload=True,
-    )
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok", "service": "covenant-certificate"}
 
 
-warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-if __name__ == "__main__":
-    main()
+@app.get("/api/demo-cases")
+async def demo_cases() -> list[dict]:
+    return [case_summary(case) for case in DEMO_CASES.values()]
+
+
+@app.get("/api/cases/{case_id}")
+async def get_case(case_id: str) -> dict:
+    case = DEMO_CASES.get(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Unknown covenant case")
+    return case_summary(case)
+
+
+@app.post("/api/cases/{case_id}/run")
+async def run(case_id: str, request: RunRequest = RunRequest()) -> dict:
+    case = DEMO_CASES.get(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Unknown covenant case")
+    return run_case(case, request)

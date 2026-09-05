@@ -1,51 +1,73 @@
 # Covenant Certificate
 
-Track 2 project for Syndicate by Maximor.
+**Track 2 — Autonomous Office of the CFO** entry for Syndicate by Maximor.
 
-## Repository layout
+Covenant Certificate is an evidence-first treasury workflow for preparing an officer-reviewed *draft* loan-covenant compliance certificate. It turns contract-specific rules and financial evidence into a cited, deterministic result. It does not give legal advice and never represents an AI result as a signed certificate.
+
+## What the demo proves
+
+- Same company financials can produce opposite results under different agreements.
+- An amendment can replace the original threshold for a particular test period.
+- Missing support for an EBITDA adjustment returns `NEEDS_REVIEW`, not a compliant result.
+- Every number, clause, calculation, and review decision is exposed in the evidence trail.
+
+The included cases are illustrative product data, not legal documents or legal conclusions.
+
+## Product workflow
 
 ```text
-apps/web        Next.js, CopilotKit, AG-UI frontend
-apps/api        FastAPI and LangGraph backend
-docs            Domain research and backend architecture
-references      Read-only upstream design and integration references
+Resolve controlling agreement and amendment
+  -> compile cited covenant rule
+  -> map financial evidence
+  -> calculate with typed deterministic code
+  -> apply evidence/review policy
+  -> prepare officer-reviewable draft and audit trace
 ```
 
-## Runtime services
+The calculation code contains no `eval`, no model-generated code execution, and no LLM-issued verdict. A production extraction agent may propose structured facts and rules, but a human reviewer and the calculator remain the control boundary.
 
-- Web: Next.js
-- API: FastAPI plus LangGraph
-- Database: Supabase Postgres in all environments
-- Files: private Supabase Storage buckets
-- Agent transport: AG-UI through CopilotKit
-- Model gateway: self-hosted LiteLLM Proxy
-- Planned agent observability: Neatlogs
+## Run locally
 
-## Local development
-
-Create or select a Supabase project, copy `.env.example` to `.env`, and provide its connection and API values. Dependencies have not been installed yet.
+The project uses a Next.js UI and FastAPI service. Docker is the most reliable route because it includes Python and installs locked dependencies.
 
 ```bash
 docker compose up --build
 ```
 
-The expected application endpoints are:
+Open <http://localhost:3000>. The API health endpoint is <http://localhost:8123/health>.
 
-- Web: http://localhost:3000
-- API health: http://localhost:8123/health
+No model key, database, or Supabase project is needed for the curated demonstration cases. The `.env.example` file documents environment values reserved for production persistence and document intake. The repository also includes an optional LiteLLM proxy configuration for controlled provider routing when an extraction-model integration is enabled.
 
-## Deployment targets
+## API
 
-- `apps/web`: Vercel or any Node.js container host
-- `apps/api`: Railway, Render, Fly.io, or any container host
-- Database, private files, and later authentication: Supabase
-- Agent traces, evaluations, and debugging: Neatlogs
-- Model aliases, provider routing, fallback, and budgets: LiteLLM
+```text
+GET  /health
+GET  /api/demo-cases
+GET  /api/cases/{case_id}
+POST /api/cases/{case_id}/run
+```
 
-The web application communicates with the API through the server-side CopilotKit route. Database credentials and secret keys must never be exposed through `NEXT_PUBLIC_` variables.
+The last endpoint accepts an optional reviewer decision for the evidence-gap scenario:
 
-The copied starter still uses in-memory agent state and demo data. The first backend implementation must replace those paths with Supabase Postgres persistence, private Supabase Storage, and verified Supabase Auth. Do not expose the raw agent endpoint publicly or enable CopilotKit Intelligence with its sample `demo-user` identity.
+```json
+{ "reviewer_decision": "approve_addback", "reviewer_name": "Treasury reviewer" }
+```
 
-Neatlogs instrumentation is planned but not installed. Supabase will remain the authoritative audit store; Neatlogs will hold operational traces only.
+## AO usage during the hackathon
 
-The API calls only `covenant-fast` and `covenant-strong`. LiteLLM maps those aliases to provider models and owns provider credentials, retries, fallbacks, and spend controls.
+AO was used from the beginning to coordinate independent research and implementation work. The project was decomposed into parallel research tracks, including a primary-source covenant-controls review, while the main build integrated the product workflow. AO is a development tool only; the deployed Covenant Certificate workflow is standalone and does not depend on AO at runtime.
+
+## Repository layout
+
+```text
+apps/web        Next.js control-room UI and server-side API proxy
+apps/api        FastAPI API plus typed covenant calculator and review policy
+data            curated SEC/PDF/XLSX demonstration corpus
+docs            domain research, architecture, plans, and primary-source controls brief
+infra           optional LiteLLM proxy configuration
+references      read-only upstream integration/design references
+```
+
+## Production next steps
+
+The hackathon demo uses curated in-memory cases to make the workflow inspectable. Before handling customer data, implement authenticated intake, private document storage, versioned rule/fact persistence, approved reviewer roles, immutable audit storage, and agreement-specific PDF rendering. The architecture plan in `docs/` details this hardening path.
