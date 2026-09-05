@@ -14,7 +14,6 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from src.covenant import CovenantWorkflow, RunRequest
@@ -23,6 +22,12 @@ from src.covenant.ingestion import (
     extract_aon_financials,
     extract_aon_rule,
 )
+from src.platform.jobqueue import durable_checkpointer, job_store_from_env
+
+# Durable job tracking owns restart/retry across process death; LangGraph
+# checkpoints preserve execution state only. Client disconnect never cancels
+# a job — cancellation is an explicit, authenticated command.
+JOB_STORE = job_store_from_env()
 
 
 SYSTEM_PROMPT = """
@@ -195,7 +200,7 @@ def build_agent_graph(workflow: CovenantWorkflow):
         model=model,
         tools=[list_covenant_cases, run_covenant_case, ingest_covenant_document, reevaluate_covenant_case],
         system_prompt=SYSTEM_PROMPT,
-        checkpointer=MemorySaver(),
+        checkpointer=durable_checkpointer(),
     )
 
 
@@ -225,4 +230,4 @@ def _build_offline_graph(workflow: CovenantWorkflow):
     builder.add_node("covenant_copilot", respond)
     builder.add_edge(START, "covenant_copilot")
     builder.add_edge("covenant_copilot", END)
-    return builder.compile(checkpointer=MemorySaver())
+    return builder.compile(checkpointer=durable_checkpointer())
