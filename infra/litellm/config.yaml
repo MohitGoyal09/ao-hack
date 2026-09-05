@@ -2,11 +2,11 @@ model_list:
   - model_name: covenant-fast
     litellm_params:
       model: os.environ/LITELLM_FAST_MODEL
-      api_key: os.environ/OPENAI_API_KEY
+      api_key: os.environ/GEMINI_API_KEY
   - model_name: covenant-strong
     litellm_params:
       model: os.environ/LITELLM_STRONG_MODEL
-      api_key: os.environ/ANTHROPIC_API_KEY
+      api_key: os.environ/GEMINI_API_KEY
 
 router_settings:
   routing_strategy: simple-shuffle

@@ -3,11 +3,10 @@ services:
     build:
       context: ./infra/litellm
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
-      LITELLM_FAST_MODEL: ${LITELLM_FAST_MODEL:-openai/gpt-4.1-mini}
-      LITELLM_STRONG_MODEL: ${LITELLM_STRONG_MODEL:-anthropic/claude-sonnet-4-6}
+      LITELLM_FAST_MODEL: ${LITELLM_FAST_MODEL:-gemini/gemini-2.5-flash}
+      LITELLM_STRONG_MODEL: ${LITELLM_STRONG_MODEL:-gemini/gemini-2.5-pro}
     ports:
       - "4000:4000"
 
@@ -17,8 +16,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-}
       MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_BASE_URL: http://litellm:4000/v1
       LITELLM_FAST_ALIAS: ${LITELLM_FAST_ALIAS:-covenant-fast}
