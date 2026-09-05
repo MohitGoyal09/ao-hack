@@ -98,6 +98,46 @@ class MemoryRepositoryTests(unittest.TestCase):
                 head.revision_id, head.input_bundle_hash, "accept_evidence",
                 "changed", [], "dup-key")
 
+    def test_snapshot_states_are_stored_and_documents_append(self) -> None:
+        repo = MemoryRevisionRepository()
+        org, user, case = _ids("case")
+        repo.seed_member(org, user, "officer")
+        repo.ensure_case(case, org, user, "2026-06-30", "rule-1", "4.00",
+                         ["doc-1"], ["f1"])
+        snap = repo.snapshot(case)
+        self.assertEqual(snap["run_state"], "waiting_review")
+        self.assertEqual(snap["package_state"], "draft")
+        self.assertEqual(snap["artifacts"], {})
+        self.assertEqual(snap["covenant_rules"], [])
+        self.assertEqual(snap["financial_facts"], [])
+        issue = snap["review_issues"][0]
+        self.assertEqual(issue["issue_id"], f"{case}-evidence-1")
+        self.assertEqual(issue["kind"], "evidence_gap")
+        self.assertTrue(issue["summary"])
+        repo.set_run_state(case, "rev-1", "running")
+        repo.resolve_issue(f"{case}-evidence-1", org, user, "officer", "rev-1",
+                           snap["revision"]["input_bundle_hash"], "accept_evidence",
+                           "verified", ["doc:doc-1"], "k-1")
+        snap = repo.snapshot(case)
+        self.assertEqual(snap["run_state"], "running")  # not derived from issues
+        self.assertEqual(snap["package_state"], "ready_for_officer_review")
+        resolved = snap["review_issues"][0]
+        self.assertEqual(resolved["status"], "resolved")
+        self.assertEqual(resolved["decision_kind"], "accept_evidence")
+        self.assertEqual(resolved["rationale"], "verified")
+        self.assertEqual(resolved["resolved_by"], user)
+        self.assertTrue(resolved["resolved_at"])
+        repo.approve(case, org, user, "officer", "rev-1", snap["package_hash"],
+                     "approved", "ok", fresh_ratio="4.17", fresh_threshold="4.00",
+                     fresh_comparator="<=", fresh_inputs={"f1": "1.00"})
+        self.assertEqual(repo.snapshot(case)["package_state"], "approved_draft")
+        repo.create_revision(case, org, user, "rev-1", "document_upload",
+                             ["doc-2"], [], None)
+        snap = repo.snapshot(case)
+        self.assertEqual(snap["documents"], ["doc-1", "doc-2"])
+        self.assertEqual(snap["package_state"], "draft")
+        self.assertTrue(all(a["superseded"] for a in snap["approvals"]))
+
     def test_money_serialized_as_exact_strings(self) -> None:
         repo = MemoryRevisionRepository()
         org, user, case = _ids("case")

@@ -23,6 +23,7 @@ from .revisions import (
     RevisionStore,
     StaleCommandError,
     UnknownRevisionError,
+    issue_view,
 )
 
 
@@ -31,8 +32,12 @@ class RevisionRepository(Protocol):
 
     def ensure_case(self, case_id: str, organization_id: str, user_id: str,
                     test_date: str, rule_id: str, threshold: Any,
-                    doc_ids: list[str], fact_keys: list[str]) -> CaseRevision: ...
+                    doc_ids: list[str], fact_keys: list[str], *,
+                    name: str | None = None, borrower_name: str | None = None,
+                    facility_name: str | None = None) -> CaseRevision: ...
     def current(self, case_id: str) -> CaseRevision: ...
+    def set_run_state(self, case_id: str, revision_id: str, state: str) -> None: ...
+    def artifacts_for(self, case_id: str, revision_id: str) -> list[dict]: ...
     def get(self, case_id: str, revision_id: str) -> CaseRevision: ...
     def create_revision(self, case_id: str, organization_id: str, user_id: str,
                         expected_parent: str, change_kind: str,
@@ -72,6 +77,21 @@ def _money(value: Any) -> str:
     return money_str(value)
 
 
+def _jsonb(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    import json as _json
+    return _json.loads(value)
+
+
+def _artifact_map(rows: list[dict]) -> dict:
+    """Snapshot view: ``{artifact_type: {**payload, "content_hash": ...}}``."""
+    return {r["artifact_type"]: {**_jsonb(r.get("payload"), {}),
+                                 "content_hash": r["content_hash"]} for r in rows}
+
+
 class MemoryRevisionRepository:
     """Explicit offline/demo implementation backed by RevisionStore."""
 
@@ -79,13 +99,33 @@ class MemoryRevisionRepository:
         self._store = RevisionStore()
         self._case_org: dict[str, str] = {}
         self._members: dict[tuple[str, str], str] = {}
+        self._pipeline = None  # memory CasePipeline bound for artifacts/rules/facts
 
     def seed_member(self, organization_id: str, user_id: str, role: str) -> None:
         self._members[(organization_id, user_id)] = role
 
+    def bind_pipeline(self, pipeline: Any) -> None:
+        """Share an in-process memory CasePipeline so snapshot() sees its output."""
+        self._pipeline = pipeline
+
+    def set_run_state(self, case_id: str, revision_id: str, state: str) -> None:
+        self._store.set_run_state(case_id, revision_id, state)
+
+    def artifacts_for(self, case_id: str, revision_id: str) -> list[dict]:
+        if self._pipeline is None:
+            return []
+        return self._pipeline.artifacts_for(case_id, revision_id)
+
+    def _pipeline_rows(self, table: str, case_id: str, revision_id: str) -> list[dict]:
+        rows = getattr(self._pipeline, table, {}) if self._pipeline is not None else {}
+        return [dict(row) for (c, r, _), row in sorted(rows.items())
+                if c == case_id and r == revision_id]
+
     def ensure_case(self, case_id: str, organization_id: str, user_id: str,
                     test_date: str, rule_id: str, threshold: Any,
-                    doc_ids: list[str], fact_keys: list[str]) -> CaseRevision:
+                    doc_ids: list[str], fact_keys: list[str], *,
+                    name: str | None = None, borrower_name: str | None = None,
+                    facility_name: str | None = None) -> CaseRevision:
         existing_org = self._case_org.get(case_id)
         if existing_org is not None and existing_org != organization_id:
             raise UnknownRevisionError(case_id)
@@ -162,6 +202,10 @@ class MemoryRevisionRepository:
     def snapshot(self, case_id: str) -> dict:
         snap = self._store.snapshot(case_id)
         snap["organization_id"] = self._case_org.get(case_id)
+        rev = snap["revision"]["revision_id"]
+        snap["artifacts"] = _artifact_map(self.artifacts_for(case_id, rev))
+        snap["covenant_rules"] = self._pipeline_rows("_rules", case_id, rev)
+        snap["financial_facts"] = self._pipeline_rows("_facts", case_id, rev)
         return snap
 
     def append_event(self, case_id: str, organization_id: str,
@@ -262,7 +306,9 @@ class PostgresRevisionRepository:
     # -- cases --------------------------------------------------------
     def ensure_case(self, case_id: str, organization_id: str, user_id: str,
                     test_date: str, rule_id: str, threshold: Any,
-                    doc_ids: list[str], fact_keys: list[str]) -> CaseRevision:
+                    doc_ids: list[str], fact_keys: list[str], *,
+                    name: str | None = None, borrower_name: str | None = None,
+                    facility_name: str | None = None) -> CaseRevision:
         threshold_s = _money(threshold)
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -277,8 +323,9 @@ class PostgresRevisionRepository:
                         " (id, organization_id, name, borrower_name, facility_name,"
                         " test_date, created_by) values"
                         " (%s, %s, %s, %s, %s, %s::date, %s)",
-                        (case_id, organization_id, case_id, "borrower",
-                         "facility", test_date, user_id),
+                        (case_id, organization_id, name or case_id,
+                         borrower_name or "borrower", facility_name or "facility",
+                         test_date, user_id),
                     )
                 elif str(row[0]) != str(organization_id):
                     raise UnknownRevisionError(case_id)
@@ -432,10 +479,11 @@ class PostgresRevisionRepository:
                 prev_snap = srow[0] if isinstance(srow[0], dict) else _json.loads(srow[0])
                 prev_docs = set(prev_snap.get("documents", []))
                 prev_facts = set(prev_snap.get("facts", []))
-                new_docs = set(documents) if documents else prev_docs
+                # Append-only document set (see RevisionStore.create_revision).
+                new_docs = prev_docs | set(documents)
                 new_facts = set(facts) if facts else prev_facts
                 added = sorted(new_docs - prev_docs)
-                replaced = sorted(d for d in documents if d in prev_docs) if documents else []
+                replaced = sorted(d for d in documents if d in prev_docs)
                 changed_facts = sorted(new_facts - prev_facts)
                 threshold_s = _money(new_threshold) if new_threshold is not None else str(prev_snap["threshold"])
                 threshold_changed = threshold_s != str(prev_snap["threshold"])
@@ -672,6 +720,13 @@ class PostgresRevisionRepository:
                      _json.dumps(list(evidence_refs)), issue_uuid),
                 )
                 cur.execute(
+                    "update public.case_revisions set package_state = 'ready_for_officer_review'"
+                    " where case_id = %s and revision_id = %s and package_state = 'draft'"
+                    " and not exists (select 1 from public.review_issues"
+                    "   where case_id = %s and revision_id = %s and status = 'open')",
+                    (issue_case, revision_id, issue_case, revision_id),
+                )
+                cur.execute(
                     "insert into public.review_decisions"
                     " (organization_id, issue_id, case_id, revision_id, actor_id,"
                     " actor_role, decision_kind, rationale, evidence_refs,"
@@ -769,6 +824,12 @@ class PostgresRevisionRepository:
                      comparator, _json.dumps(inputs), head_bundle, supersedes),
                 )
                 new_id, created_at = cur.fetchone()
+                if decision == "approved":
+                    cur.execute(
+                        "update public.case_revisions set package_state = 'approved_draft'"
+                        " where case_id = %s and revision_id = %s",
+                        (case_id, revision_id),
+                    )
                 seq = self._next_sequence(cur, case_id, organization_id)
                 cur.execute(
                     "insert into public.domain_events"
@@ -789,14 +850,13 @@ class PostgresRevisionRepository:
                 )
 
     def snapshot(self, case_id: str) -> dict:
-        import json as _json
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "select case_id, revision_id, parent_revision_id, test_date,"
                     " input_bundle_hash, rulebook_hash, mapping_hash,"
                     " calculation_hash, coverage_hash, package_hash,"
-                    " package_state, threshold, rule_id, organization_id"
+                    " package_state, threshold, rule_id, organization_id, run_state"
                     " from public.case_revisions where case_id = %s"
                     " order by created_at desc limit 1",
                     (case_id,),
@@ -806,23 +866,14 @@ class PostgresRevisionRepository:
                     raise UnknownRevisionError(case_id)
                 org = str(row[13])
                 head = self._rev_from_row(row[:13])
+                rev = head.revision_id
                 cur.execute(
                     "select snapshot from public.case_snapshots"
                     " where case_id = %s and revision_id = %s",
-                    (case_id, head.revision_id),
+                    (case_id, rev),
                 )
                 srow = cur.fetchone()
-                snap = srow[0] if srow and isinstance(srow[0], dict) else (
-                    _json.loads(srow[0]) if srow else {"documents": [], "facts": []})
-                cur.execute(
-                    "select actor_id, actor_role, target_revision"
-                    " from (select actor_id, actor_role, revision_id as target_revision,"
-                    " created_at from public.approval_bindings"
-                    " where case_id = %s and organization_id = %s) a"
-                    " order by created_at",
-                    (case_id, org),
-                )
-                # Full approval payloads for the snapshot view.
+                snap = _jsonb(srow[0], {}) if srow else {}
                 cur.execute(
                     "select actor_id, actor_role, revision_id, package_hash, decision,"
                     " reason, created_at, approved_ratio, approved_threshold,"
@@ -841,42 +892,106 @@ class PostgresRevisionRepository:
                         "approved_ratio": str(a[7]) if a[7] is not None else None,
                         "approved_threshold": str(a[8]) if a[8] is not None else None,
                         "approved_comparator": a[9],
-                        "approved_inputs": a[10] if isinstance(a[10], dict) else {},
+                        "approved_inputs": _jsonb(a[10], {}),
                         # Append-only read model: anything not targeting the
                         # head is historical.
-                        "superseded": bool(a[2] != head.revision_id),
+                        "superseded": bool(a[2] != rev),
                     })
                 cur.execute(
-                    "select count(*) from public.review_issues"
-                    " where case_id = %s and organization_id = %s"
-                    " and revision_id = %s and status = 'open'",
-                    (case_id, org, head.revision_id),
+                    "select external_issue_id, status, issue_kind, decision_kind,"
+                    " rationale, resolved_by, resolved_at from public.review_issues"
+                    " where case_id = %s and organization_id = %s and revision_id = %s"
+                    " order by created_at",
+                    (case_id, org, rev),
                 )
-                open_issues = int(cur.fetchone()[0])
+                issues = [issue_view(*r) for r in cur.fetchall()]
+                open_issues = sum(1 for i in issues if i["status"] == "open")
+                cur.execute(
+                    "select external_rule_id, covenant_type, support_state, comparator,"
+                    " threshold, measurement_period, structured_rule, source_spans"
+                    " from public.covenant_rules where case_id = %s and revision_id = %s"
+                    " order by external_rule_id",
+                    (case_id, rev),
+                )
+                rules = [{
+                    "external_rule_id": r[0], "covenant_type": r[1],
+                    "support_state": r[2], "comparator": r[3],
+                    "threshold": _money(r[4]) if r[4] is not None else None,
+                    "measurement_period": r[5],
+                    "structured_rule": _jsonb(r[6], {}),
+                    "source_spans": _jsonb(r[7], []),
+                } for r in cur.fetchall()]
+                cur.execute(
+                    "select fact_key, amount, currency, unit_scale, period_start,"
+                    " period_end, evidence_state, source_spans"
+                    " from public.financial_facts where case_id = %s and revision_id = %s"
+                    " order by fact_key",
+                    (case_id, rev),
+                )
+                facts = [{
+                    "fact_key": r[0],
+                    "amount": _money(r[1]) if r[1] is not None else None,
+                    "currency": r[2], "unit_scale": int(r[3]),
+                    "period_start": r[4].isoformat() if r[4] is not None else None,
+                    "period_end": r[5].isoformat() if r[5] is not None else None,
+                    "evidence_state": r[6],
+                    "source_spans": _jsonb(r[7], []),
+                } for r in cur.fetchall()]
+                artifacts = _artifact_map(self._artifact_rows(cur, case_id, rev))
                 cur.execute(
                     "select max(sequence) from public.domain_events where case_id = %s",
                     (case_id,),
                 )
                 last = cur.fetchone()[0]
-                docs = snap.get("documents", []) if isinstance(snap, dict) else []
                 return {
                     "case_id": case_id,
                     "organization_id": org,
                     "revision": head.model_dump(mode="json"),
-                    "run_state": "waiting_review" if open_issues else "completed",
+                    # Stored columns, not derived from issue counts.
+                    "run_state": row[14],
                     "per_covenant_results": [
                         {"rule_id": head.rule_id, "threshold": head.threshold,
                          "status": "stale" if open_issues else "current"}
                     ],
                     "coverage": {"state": "complete_for_declared_scope",
                                  "hash": head.coverage_hash},
-                    "package_state": "ready_for_officer_review" if open_issues else "draft",
+                    "package_state": row[10],
                     "package_hash": head.package_hash,
                     "open_review_issues": open_issues,
-                    "documents": docs,
+                    "review_issues": issues,
+                    "documents": list(snap.get("documents", [])),
+                    "artifacts": artifacts,
+                    "covenant_rules": rules,
+                    "financial_facts": facts,
                     "approvals": approvals,
                     "last_event_sequence": int(last or 0),
                 }
+
+    @staticmethod
+    def _artifact_rows(cur: Any, case_id: str, revision_id: str) -> list[dict]:
+        cur.execute(
+            "select artifact_type, content_hash, payload from public.artifacts"
+            " where case_id = %s and revision_id = %s and state = 'current'"
+            " order by artifact_type",
+            (case_id, revision_id),
+        )
+        return [{"artifact_type": r[0], "content_hash": r[1],
+                 "payload": _jsonb(r[2], {})} for r in cur.fetchall()]
+
+    def artifacts_for(self, case_id: str, revision_id: str) -> list[dict]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                return self._artifact_rows(cur, case_id, revision_id)
+
+    def set_run_state(self, case_id: str, revision_id: str, state: str) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "update public.case_revisions set run_state = %s"
+                    " where case_id = %s and revision_id = %s",
+                    (state, case_id, revision_id),
+                )
+            conn.commit()
 
     def append_event(self, case_id: str, organization_id: str,
                      revision_id: str | None, run_id: str | None,

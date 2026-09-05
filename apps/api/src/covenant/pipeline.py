@@ -31,8 +31,11 @@ import tempfile
 from collections.abc import Callable
 from decimal import Decimal, ROUND_HALF_UP
 
+from pathlib import Path
+
 from src.covenant import ingestion
 from src.covenant.documents import DocumentService, UnknownDocumentError
+from src.covenant.policy import period_end
 
 _TWO_PLACES = Decimal("0.01")
 _EVIDENCE_PERIOD_START = "2023-01-01"
@@ -72,10 +75,17 @@ def _content_hash(payload: dict) -> str:
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
 
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 class CasePipeline:
     """Drive one revision-run job from document bytes to persisted results."""
 
-    def __init__(self, dsn: str | None, storage) -> None:
+    def __init__(self, dsn: str | None, storage, revision_repository=None) -> None:
+        """``revision_repository`` (memory mode only): share the API's
+        MemoryRevisionRepository so RUN_* events, run_state and artifacts show
+        up in its snapshot. Postgres mode always reads/writes the tables."""
         self._dsn = dsn
         self._storage = storage
         self.documents = DocumentService(dsn, storage)
@@ -85,7 +95,9 @@ class CasePipeline:
         self._facts: dict[tuple[str, str, str], dict] = {}
         self._artifacts: dict[tuple[str, str], list[dict]] = {}
         self._events: dict[tuple[str, str], list[dict]] = {}
-        self._events_repo = None  # lazy memory revision repo for RUN_* events
+        self._events_repo = revision_repository  # memory revision repo for RUN_* events
+        if dsn is None and hasattr(revision_repository, "bind_pipeline"):
+            revision_repository.bind_pipeline(self)
 
     # -- public API -------------------------------------------------
 
@@ -95,7 +107,7 @@ class CasePipeline:
         case_id = job.case_id
         revision_id = job.revision_id
         if self._dsn is None:
-            self._run_states[(case_id, revision_id)] = "running"
+            self._set_run_state(org, case_id, revision_id, "running")
         else:
             import psycopg
 
@@ -130,49 +142,118 @@ class CasePipeline:
         revision_id = job.revision_id
 
         # (1) load latest doc version + bytes.
+        org = self._resolve_org(job)
         try:
-            version, data = self.documents.read_bytes(document_id, self._resolve_org(job))
+            version, data = self.documents.read_bytes(document_id, org)
         except UnknownDocumentError as error:
             raise PermanentRunError(f"unknown document {document_id}") from error
         except FileNotFoundError as error:
             raise TransientRunError(f"storage unavailable for {document_id}") from error
         on_progress()
 
-        # (2) extraction attempt via a temp file, cleaned up in finally.
-        tmp_path = None
-        rule = None
-        facts = None
-        extraction_state = "unsupported"
-        try:
-            with tempfile.NamedTemporaryFile(
-                suffix=".bin", delete=False
-            ) as handle:
-                handle.write(bytes(data))
-                tmp_path = handle.name
-            from pathlib import Path
-
-            tmp = Path(tmp_path)
-            try:
-                rule = ingestion.extract_aon_rule(tmp)
-                facts = ingestion.extract_aon_financials(tmp)
-                extraction_state = "supported"
-            except Exception:
-                rule, facts = None, None
-                extraction_state = "unsupported"
-        finally:
-            if tmp_path is not None:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
+        # (2) extraction: the uploaded bytes first, then the case's latest
+        # document of the matching role, then the bundled Aon fixture. Every
+        # result records where it came from so nothing is silently invented.
+        # The rule must come from real case evidence (never a fixture): an
+        # upload that yields no covenant stays unsupported.
+        rule, rule_source = self._extract(
+            ingestion.extract_aon_rule, version, data, org, case_id,
+            "credit_agreement", None, "",
+        )
+        facts, fact_source = None, {"kind": "skipped",
+                                    "reason": "no covenant rule extracted"}
+        if rule is not None:
+            facts, fact_source = self._extract(
+                ingestion.extract_aon_financials, version, data, org, case_id,
+                "financial_statement",
+                ingestion.data_root() / "sec" / "aon" / "2023-form-10k.html",
+                "bundled fixture: Aon 2023 10-K",
+            )
         on_progress()
+        sources = {"rule": rule_source, "facts": fact_source}
 
         sha = hashlib.sha256(bytes(data)).hexdigest()
         if rule is None or facts is None:
             return self._finish_unsupported(
-                job, on_progress, version, sha, extraction_state
+                job, on_progress, version, sha, "unsupported", sources
             )
-        return self._finish_supported(job, on_progress, version, rule, facts)
+        return self._finish_supported(job, on_progress, version, rule, facts, sources)
+
+    def set_run_state(self, job, state: str) -> None:
+        """Worker hook: record a terminal state ('failed'/'cancelled') for the job's revision."""
+        self._set_run_state(self._resolve_org(job), job.case_id, job.revision_id, state)
+
+    # -- extraction sources ------------------------------------------
+
+    def _extract(self, extractor, version, data, org, case_id, role,
+                 bundled: Path | None, bundled_label: str) -> tuple[object | None, dict]:
+        """Return ``(extracted, source)``; ``extracted`` is None when nothing parsed.
+
+        Order: the uploaded bytes, the case's latest *role* document, then
+        *bundled* (a labelled repo fixture) when one is given.
+        """
+        candidates = [("upload", version, bytes(data))]
+        other = self._latest_case_document(org, case_id, role, exclude=version.document_id)
+        if other is not None:
+            candidates.append(("case_document", other[0], other[1]))
+        for kind, ver, blob in candidates:
+            result = self._extract_bytes(extractor, blob)
+            if result is not None:
+                return result, {"kind": kind, "document_id": ver.document_id,
+                                "sha256": ver.sha256}
+        attempted = [c[0] for c in candidates]
+        if bundled is None:
+            return None, {"kind": "none", "attempted": attempted}
+        try:
+            result = extractor(bundled)
+        except Exception:
+            return None, {"kind": "none", "attempted": attempted + ["bundled_fixture"]}
+        return result, {"kind": "bundled_fixture", "label": bundled_label,
+                        "path": f"data/raw/{bundled.relative_to(ingestion.data_root())}",
+                        "sha256": _file_sha256(bundled)}
+
+    @staticmethod
+    def _extract_bytes(extractor, blob: bytes):
+        with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as handle:
+            handle.write(blob)
+            tmp_path = handle.name
+        try:
+            return extractor(Path(tmp_path))
+        except Exception:
+            return None
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    def _latest_case_document(self, org: str, case_id: str, role: str, exclude: str):
+        """Latest (version, bytes) of the case's newest *role* document, or None."""
+        if self._dsn is None:
+            docs = [d for d in self.documents._documents.values()  # noqa: SLF001
+                    if d.case_id == case_id and d.organization_id == org
+                    and d.document_role == role and d.id != exclude]
+            doc_id = docs[-1].id if docs else None
+        else:
+            import psycopg
+
+            with psycopg.connect(self._dsn, autocommit=True) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "select id from public.documents"
+                        " where organization_id = %s and case_id = %s"
+                        " and document_role = %s and id <> %s"
+                        " order by created_at desc limit 1",
+                        (org, case_id, role, exclude),
+                    )
+                    row = cur.fetchone()
+                    doc_id = str(row[0]) if row else None
+        if doc_id is None:
+            return None
+        try:
+            return self.documents.read_bytes(doc_id, org)
+        except (UnknownDocumentError, FileNotFoundError):
+            return None
 
     # -- reads (both modes) ------------------------------------------
 
@@ -359,6 +440,8 @@ class CasePipeline:
     ) -> None:
         if self._dsn is None:
             self._run_states[(case_id, revision_id)] = state
+            if hasattr(self._events_repo, "set_run_state"):
+                self._events_repo.set_run_state(case_id, revision_id, state)
             return
         import psycopg
 
@@ -375,11 +458,15 @@ class CasePipeline:
     # -- supported path -----------------------------------------------
 
     def _finish_supported(
-        self, job, on_progress: Callable[[], None], version, rule, facts
+        self, job, on_progress: Callable[[], None], version, rule, facts,
+        sources: dict | None = None,
     ) -> dict:
         org = self._resolve_org(job)
         case_id = job.case_id
         revision_id = job.revision_id
+        sources = sources or {}
+        fact_source = sources.get("facts") or {"kind": "upload"}
+        measurement_period = f"Measurement Period ended {ingestion.AON_TEST_DATE}"
         fact_map = {fact.key: fact for fact in facts}
 
         def part(key: str) -> Decimal:
@@ -397,7 +484,7 @@ class CasePipeline:
             return self._finish_unsupported(
                 job, on_progress, version,
                 hashlib.sha256(funded_debt.to_eng_string().encode()).hexdigest(),
-                "unsupported",
+                "unsupported", sources,
             )
         ratio = (funded_debt / ebitda).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
         threshold = Decimal(str(rule.tiers[0].threshold)).quantize(
@@ -428,6 +515,7 @@ class CasePipeline:
                 "support_state": "supported",
                 "comparator": rule.comparator,
                 "threshold": threshold_s,
+                "measurement_period": measurement_period,
                 "structured_rule": structured_rule,
                 "source_spans": source_spans,
             }
@@ -440,7 +528,7 @@ class CasePipeline:
                     "period_start": _EVIDENCE_PERIOD_START,
                     "period_end": _EVIDENCE_PERIOD_END,
                     "evidence_state": "accepted",
-                    "source_spans": [{"locator": fact.locator}],
+                    "source_spans": [{"locator": fact.locator, "source": fact_source}],
                 }
         else:
             import psycopg
@@ -461,12 +549,12 @@ class CasePipeline:
                         " structured_rule = excluded.structured_rule,"
                         " source_spans = excluded.source_spans",
                         (org, case_id, revision_id, external_rule_id,
-                         rule.comparator, threshold_s,
-                         ingestion.AON_FINANCIAL_PERIOD,
+                         rule.comparator, threshold_s, measurement_period,
                          _canonical(structured_rule), _canonical(source_spans)),
                     )
                     for fact in facts:
-                        spans = _canonical([{"locator": fact.locator}])
+                        spans = _canonical([{"locator": fact.locator,
+                                             "source": fact_source}])
                         cur.execute(
                             "insert into public.financial_facts"
                             " (organization_id, case_id, revision_id, fact_key,"
@@ -491,12 +579,22 @@ class CasePipeline:
             "ratio": ratio_s,
             "threshold": threshold_s,
             "comparator": rule.comparator,
-            "ebitda": str(ebitda),
-            "funded_debt": str(funded_debt),
+            "ebitda": _exact(ebitda),
+            "funded_debt": _exact(funded_debt),
             "formula": rule.formula_label,
             "inputs": inputs,
             "document_id": version.document_id,
             "document_sha256": version.sha256,
+            "fact_source": fact_source,
+            # Same deterministic check as policy.period_mismatch_issue: the
+            # facts must cover the covenant test period or no verdict follows.
+            "period_check": {
+                "facts_period_end": _EVIDENCE_PERIOD_END,
+                "measurement_period_end": period_end(measurement_period),
+                "matches": _EVIDENCE_PERIOD_END == period_end(measurement_period),
+                "note": "Arithmetic on extracted proxies; not a compliance verdict "
+                        "unless the financial period matches the test period.",
+            },
         }
         coverage_payload = {
             "status": "complete_for_declared_scope",
@@ -515,6 +613,7 @@ class CasePipeline:
             "document_sha256": version.sha256,
             "rule_spans": source_spans,
             "fact_count": len(facts),
+            "sources": sources,
         }
         stored_manifest = self._store_artifact(
             org, case_id, revision_id, "evidence_manifest", manifest_payload
@@ -576,7 +675,7 @@ class CasePipeline:
 
     def _finish_unsupported(
         self, job, on_progress: Callable[[], None], version, sha: str,
-        extraction_state: str,
+        extraction_state: str, sources: dict | None = None,
     ) -> dict:
         org = self._resolve_org(job)
         case_id = job.case_id
@@ -587,6 +686,7 @@ class CasePipeline:
             "document_sha256": version.sha256,
             "content_sha256": sha,
             "note": "extraction unsupported; awaiting officer review",
+            "sources": sources or {},
         }
         stored = self._store_artifact(
             org, case_id, revision_id, "evidence_manifest", manifest_payload

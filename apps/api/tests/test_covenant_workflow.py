@@ -148,6 +148,18 @@ class CovenantWorkflowTests(unittest.TestCase):
         )
         self.assertIn("not full agreement compliance", result.status_reason.lower())
 
+    def test_aon_period_mismatch_is_held_in_review_not_compliant(self):
+        result = self.workflow.run("aon-term-loan-leverage")
+
+        self.assertEqual(result.status, DraftStatus.REVIEW)
+        codes = {issue.code for issue in result.review_issues if issue.severity == "blocking"}
+        self.assertEqual(codes, {"FINANCIAL_PERIOD_MISMATCH"})
+        self.assertIn("2023-12-31", result.status_reason)
+        self.assertIn("2024-03-31", result.status_reason)
+        self.assertFalse(result.certificate.finalization_allowed)
+        # Arithmetic is still shown transparently; the verdict is withheld.
+        self.assertIsNotNone(result.calculation.ratio)
+
     def test_pass_never_labelled_full_compliance(self):
         result = self.workflow.run("aurora-net-leverage")
 

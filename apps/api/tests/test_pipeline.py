@@ -212,6 +212,109 @@ class MemorySupportedPathTests(unittest.TestCase):
         self.assertEqual(len(rows), 5)
 
 
+STATEMENT_BYTES = b"<html>uploaded 10-K stand-in</html>"
+
+
+def _financials_from(match) -> "callable":
+    """Fake extractor: succeeds only for the path *match* accepts."""
+
+    def extractor(path=None):
+        if path is not None and match(path):
+            return FAKE_FACTS
+        raise ValueError("not a 10-K")
+
+    return extractor
+
+
+class MemoryFallbackTests(unittest.TestCase):
+    """Rule from the upload, financials from case evidence or the labelled fixture."""
+
+    def setUp(self) -> None:
+        self.pipeline = CasePipeline(None, MemoryStorageAdapter())
+        self.version = _upload(
+            self.pipeline, document_role="credit_agreement", filename="agreement.pdf",
+            content_type="application/pdf",
+        )
+        self.job = _job("case-1", "rev-1", self.version.document_id)
+
+    def _run(self, financials):
+        with patch("src.covenant.ingestion.extract_aon_rule", return_value=FAKE_RULE), \
+             patch("src.covenant.ingestion.extract_aon_financials", side_effect=financials):
+            self.pipeline.begin(self.job)
+            return self.pipeline.run(self.job, on_progress=lambda: None)
+
+    def _manifest(self):
+        return next(a for a in self.pipeline.artifacts_for("case-1", "rev-1")
+                    if a["artifact_type"] == "evidence_manifest")["payload"]
+
+    def test_bundled_10k_fallback_is_labelled_not_silent(self) -> None:
+        result = self._run(_financials_from(lambda p: p.name == "2023-form-10k.html"))
+        self.assertEqual(result["status"], "completed")
+        sources = self._manifest()["sources"]
+        self.assertEqual(sources["rule"]["kind"], "upload")
+        self.assertEqual(sources["facts"]["kind"], "bundled_fixture")
+        self.assertEqual(sources["facts"]["label"], "bundled fixture: Aon 2023 10-K")
+        calc = next(a for a in self.pipeline.artifacts_for("case-1", "rev-1")
+                    if a["artifact_type"] == "calculation")["payload"]
+        self.assertEqual(calc["fact_source"]["kind"], "bundled_fixture")
+        self.assertFalse(calc["period_check"]["matches"])
+        self.assertEqual(calc["period_check"]["measurement_period_end"], "2024-03-31")
+        fact = self.pipeline._facts[("case-1", "rev-1", "funded_debt")]  # noqa: SLF001
+        self.assertEqual(fact["source_spans"][0]["source"]["kind"], "bundled_fixture")
+
+    def test_case_financial_statement_beats_the_fixture(self) -> None:
+        statement = _upload(
+            self.pipeline, data=STATEMENT_BYTES, filename="10k.html",
+            content_type="text/html", document_role="financial_statement",
+        )
+        result = self._run(_financials_from(lambda p: p.read_bytes() == STATEMENT_BYTES))
+        self.assertEqual(result["status"], "completed")
+        facts_source = self._manifest()["sources"]["facts"]
+        self.assertEqual(facts_source["kind"], "case_document")
+        self.assertEqual(facts_source["document_id"], statement.document_id)
+        self.assertEqual(facts_source["sha256"], statement.sha256)
+
+    def test_upload_without_rule_never_reads_fixtures(self) -> None:
+        with patch("src.covenant.ingestion.extract_aon_rule", side_effect=ValueError("no")), \
+             patch("src.covenant.ingestion.extract_aon_financials") as financials:
+            self.pipeline.begin(self.job)
+            result = self.pipeline.run(self.job, on_progress=lambda: None)
+        self.assertEqual(result["status"], "waiting_review")
+        financials.assert_not_called()
+        self.assertEqual(self._manifest()["sources"]["facts"]["kind"], "skipped")
+
+    def test_bound_memory_repository_snapshot_sees_worker_output(self) -> None:
+        from src.covenant.revision_repository import MemoryRevisionRepository
+
+        repo = MemoryRevisionRepository()
+        repo.ensure_case("case-1", "org-1", "user-1", "2024-03-31",
+                         "aon-max-consolidated-leverage", "4.00", ["doc-0"], [])
+        pipeline = CasePipeline(None, MemoryStorageAdapter(), revision_repository=repo)
+        version = _upload(pipeline, document_role="credit_agreement")
+        job = _job("case-1", "rev-1", version.document_id)
+        with patch("src.covenant.ingestion.extract_aon_rule", return_value=FAKE_RULE), \
+             patch("src.covenant.ingestion.extract_aon_financials", return_value=FAKE_FACTS):
+            pipeline.begin(job)
+            self.assertEqual(repo.snapshot("case-1")["run_state"], "running")
+            pipeline.run(job, on_progress=lambda: None)
+        snap = repo.snapshot("case-1")
+        self.assertEqual(snap["run_state"], "completed")
+        self.assertEqual(snap["artifacts"]["calculation"]["ratio"], "3.64")
+        self.assertEqual(snap["artifacts"]["calculation"]["threshold"], "4.00")
+        self.assertEqual(len(snap["artifacts"]["calculation"]["content_hash"]), 64)
+        self.assertEqual(snap["covenant_rules"][0]["external_rule_id"],
+                         "aon-max-consolidated-leverage")
+        self.assertEqual(snap["covenant_rules"][0]["threshold"], "4.00")
+        self.assertEqual({f["fact_key"] for f in snap["financial_facts"]},
+                         {f.key for f in FAKE_FACTS})
+        self.assertEqual(snap["review_issues"][0]["issue_id"], "case-1-evidence-1")
+        self.assertEqual(snap["review_issues"][0]["status"], "open")
+        names = [e["name"] for e in repo.list_events("case-1")]
+        self.assertIn("CALCULATION_COMPLETED", names)
+        pipeline.set_run_state(job, "failed")
+        self.assertEqual(repo.snapshot("case-1")["run_state"], "failed")
+
+
 def _provision_org_case(cur, org: str, user: str, case_id: str) -> None:
     cur.execute(
         "insert into auth.users (id) values (%s) on conflict (id) do nothing",

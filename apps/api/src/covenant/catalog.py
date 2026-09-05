@@ -19,7 +19,7 @@ from typing import Literal
 
 from .domain import Citation, CovenantCase, CovenantRule, DocumentVersion, FinancialFact
 from .hashing import stable_hash
-from .ingestion import AON_CASE_ID, build_aon_term_loan_case
+from .ingestion import AON_CASE_ID, AON_TEST_DATE, build_aon_term_loan_case
 
 
 PERIOD = "Trailing twelve months ended 2026-06-30"
@@ -358,5 +358,10 @@ def build_demo_catalog() -> dict[str, CovenantCase]:
         ),
     ]
     catalog = {case.id: case for case in cases}
-    catalog[AON_CASE_ID] = build_aon_term_loan_case()
+    aon = build_aon_term_loan_case()
+    # The rule is tested for the Measurement Period ending on the test date;
+    # the bundled facts are fiscal-2023, so the policy period guard holds the
+    # Aon case in NEEDS_REVIEW instead of showing a real issuer as compliant.
+    aon.rule.measurement_period = f"Measurement Period ended {AON_TEST_DATE}"
+    catalog[AON_CASE_ID] = aon
     return catalog

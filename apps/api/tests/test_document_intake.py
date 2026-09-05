@@ -88,6 +88,7 @@ class DocumentConstantsTests(unittest.TestCase):
                 "text/csv",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "text/plain",
+                "text/html",
             },
         )
         self.assertEqual(MAX_BYTES, 50 * 1024 * 1024)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from .domain import (
     CalculationResult,
     CovenantAssessment,
@@ -14,6 +16,41 @@ from .domain import (
     ReviewIssue,
     RunRequest,
 )
+
+
+_PERIOD_END = re.compile(r"(\d{4}-\d{2}-\d{2})\s*$")
+
+
+def period_end(label: str | None) -> str | None:
+    """ISO date a period label ends on ('... ended 2024-03-31'), or None."""
+    match = _PERIOD_END.search(label or "")
+    return match.group(1) if match else None
+
+
+def period_mismatch_issue(case: CovenantCase) -> ReviewIssue | None:
+    """Blocking issue when any fact's period does not end on the rule's test period.
+
+    Deterministic date comparison only (contract: 'financial period precedes
+    applicable testing date -> indeterminate with a specific missing-period
+    request'). Rules without a dated measurement period are not checked.
+    """
+    expected = period_end(case.rule.measurement_period)
+    if expected is None:
+        return None
+    mismatched = [fact for fact in case.facts if period_end(fact.period) != expected]
+    if not mismatched:
+        return None
+    found = sorted({period_end(fact.period) or "unknown" for fact in mismatched})
+    return ReviewIssue(
+        code="FINANCIAL_PERIOD_MISMATCH",
+        severity="blocking",
+        message=(
+            f"Financial inputs cover the period ended {', '.join(found)}, not the "
+            f"covenant measurement period ended {expected}. Provide financial "
+            f"statements for the period ended {expected} before any verdict."
+        ),
+        related_keys=[fact.key for fact in mismatched],
+    )
 
 
 class ReviewPolicy:
@@ -54,6 +91,10 @@ class ReviewPolicy:
                     message="The compiled covenant rule has no supporting clause citation.",
                 )
             )
+
+        period_issue = period_mismatch_issue(case)
+        if period_issue is not None:
+            issues.append(period_issue)
 
         unsupported = [fact for fact in case.facts if not fact.supported]
         unresolved = [fact for fact in unsupported if fact.requires_review]

@@ -31,7 +31,10 @@ ALLOWED_MEDIA = frozenset({
     "text/csv",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "text/plain",
+    "text/html",
 })
+# Keep in sync with storage.buckets.allowed_mime_types for 'covenant-private';
+# a type the bucket rejects surfaces as a storage error (HTTP 500), not a 422.
 
 MAX_BYTES = 50 * 1024 * 1024
 
@@ -81,6 +84,7 @@ def classify_upload(media_type: str, data: bytes) -> str:
         "text/csv",
         "application/json",
         "text/plain",
+        "text/html",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ):
         return "pending"

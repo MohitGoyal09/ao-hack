@@ -260,6 +260,10 @@ def _ensure_revisions(case_id: str, principal: Principal,
             threshold=case.rule.threshold,
             doc_ids=[d.id for d in case.documents],
             fact_keys=[f.key for f in case.facts],
+            # ponytail: borrower = the case-name prefix ("Aon: ..."); add a
+            # borrower field to CovenantCase if real borrower data ever lands.
+            name=case.name, borrower_name=case.name.split(":")[0].strip(),
+            facility_name=case.agreement,
         )
     else:
         role = _offline_member_role(repo, org_id, principal, authorization)
@@ -412,10 +416,24 @@ async def run_case(
     request: RunRequest = RunRequest(),
     principal: Principal = Depends(current_principal),
 ) -> dict:
+    # Recalculation honesty: when the case has revisions, run against the head
+    # revision's threshold so the visible numbers equal the approvable ones.
+    case_override = None
+    if revision_repository is not None:
+        try:
+            head = await asyncio.to_thread(revision_repository.current, case_id)
+            base = workflow._repository.get_case(case_id)  # noqa: SLF001
+            threshold = float(head.threshold)
+            if threshold != base.rule.threshold:
+                case_override = base.model_copy(update={"rule": base.rule.model_copy(
+                    update={"threshold": threshold,
+                            "original_threshold": base.rule.threshold})})
+        except (UnknownRevisionError, UnknownCaseError):
+            pass
     try:
         with observer.workflow_span(case_id):
             result = await asyncio.to_thread(
-                workflow.run, case_id, request, observer.callbacks()
+                workflow.run, case_id, request, observer.callbacks(), case_override
             )
             observer.record_outcome(case_id, result.run_id, result.status.value)
         artifact_path = await asyncio.to_thread(
@@ -571,9 +589,23 @@ async def officer_approval(
         head = repo.get(case_id, revision_id)
     except UnknownRevisionError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    rule = case.rule.model_copy(update={"threshold": float(head.threshold)})
-    calculation, _ = CovenantCalculator().calculate(case.model_copy(update={"rule": rule}), ReviewerDecision.PENDING)
-    fresh_inputs = {line.fact_key: money_str(line.amount) for line in calculation.lines if line.included}
+    # Fresh numbers: the worker's calculation artifact for this revision when
+    # one exists (uploaded documents), else the fixture case at the head threshold.
+    calc_artifact = next(
+        (a for a in repo.artifacts_for(case_id, revision_id)
+         if a["artifact_type"] == "calculation"), None)
+    if calc_artifact is not None:
+        calc = calc_artifact["payload"]
+        fresh_ratio, fresh_threshold = calc.get("ratio"), calc.get("threshold")
+        fresh_comparator = calc.get("comparator")
+        fresh_inputs = dict(calc.get("inputs") or {})
+    else:
+        rule = case.rule.model_copy(update={"threshold": float(head.threshold)})
+        calculation, _ = CovenantCalculator().calculate(case.model_copy(update={"rule": rule}), ReviewerDecision.PENDING)
+        fresh_ratio = None if calculation.ratio is None else money_str(calculation.ratio)
+        fresh_threshold = money_str(calculation.threshold)
+        fresh_comparator = calculation.comparator
+        fresh_inputs = {line.fact_key: money_str(line.amount) for line in calculation.lines if line.included}
     try:
         binding = repo.approve(
             case_id=case_id,
@@ -588,9 +620,9 @@ async def officer_approval(
             approved_threshold=body.get("approved_threshold"),
             approved_comparator=body.get("approved_comparator"),
             approved_inputs=body.get("approved_inputs"),
-            fresh_ratio=None if calculation.ratio is None else money_str(calculation.ratio),
-            fresh_threshold=money_str(calculation.threshold),
-            fresh_comparator=calculation.comparator,
+            fresh_ratio=fresh_ratio,
+            fresh_threshold=fresh_threshold,
+            fresh_comparator=fresh_comparator,
             fresh_inputs=fresh_inputs,
         )
     except UnknownRevisionError as error:

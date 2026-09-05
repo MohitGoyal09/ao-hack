@@ -58,9 +58,10 @@ class CovenantWorkflow:
         case_id: str,
         command: RunRequest | None = None,
         callbacks: list[Any] | None = None,
+        case: CovenantCase | None = None,
     ) -> WorkflowResult:
         return self._orchestrator.invoke(
-            case_id, command or RunRequest(), callbacks=callbacks
+            case_id, command or RunRequest(), callbacks=callbacks, case=case
         )
 
     def history(self, case_id: str) -> list[dict]:

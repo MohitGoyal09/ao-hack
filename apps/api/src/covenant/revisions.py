@@ -99,6 +99,30 @@ class ReviewIssueRecord(BaseModel):
     resolved_at: datetime | None = None
 
 
+ISSUE_SUMMARIES = {
+    "evidence_gap": (
+        "Supporting evidence for this revision must be reviewed and accepted "
+        "by a named reviewer before officer approval."
+    ),
+}
+
+
+def issue_view(issue_id: str, status: str, kind: str, decision_kind: str | None,
+               rationale: str | None, resolved_by: str | None,
+               resolved_at: datetime | None) -> dict:
+    """Snapshot row for one review issue (shared by memory and Postgres)."""
+    return {
+        "issue_id": issue_id,
+        "status": status,
+        "kind": kind,
+        "summary": ISSUE_SUMMARIES.get(kind, kind.replace("_", " ")),
+        "decision_kind": decision_kind,
+        "rationale": rationale,
+        "resolved_by": None if resolved_by is None else str(resolved_by),
+        "resolved_at": resolved_at.isoformat() if hasattr(resolved_at, "isoformat") else resolved_at,
+    }
+
+
 class StaleCommandError(Exception):
     pass
 
@@ -129,6 +153,12 @@ class RevisionStore:
         self._events: dict[str, list[dict]] = {}
         self._counters: dict[str, int] = {}
         self._snapshots: dict[str, dict[str, dict]] = {}
+        # Worker-owned run_state per (case, revision); mirrors case_revisions.run_state.
+        self._run_states: dict[tuple[str, str], str] = {}
+
+    def set_run_state(self, case_id: str, revision_id: str, state: str) -> None:
+        with self._lock:
+            self._run_states[(case_id, revision_id)] = state
 
     # -- seeding ---------------------------------------------------------
     def ensure_case(
@@ -219,10 +249,12 @@ class RevisionStore:
             prev_snap = self._snapshots[case_id][head.revision_id]
             prev_docs = set(prev_snap["documents"])
             prev_facts = set(prev_snap["facts"])
-            new_docs = set(documents) if documents else prev_docs
+            # Documents are append-only: an upload or amendment adds to the
+            # evidence set, it never drops what earlier revisions relied on.
+            new_docs = prev_docs | set(documents)
             new_facts = set(facts) if facts else prev_facts
             added = sorted(new_docs - prev_docs)
-            replaced = sorted(d for d in documents if d in prev_docs) if documents else []
+            replaced = sorted(d for d in documents if d in prev_docs)
             changed_facts = sorted(new_facts - prev_facts)
             threshold_str = money_str(new_threshold) if new_threshold is not None else prev_snap["threshold"]
             threshold_changed = threshold_str != prev_snap["threshold"]
@@ -343,6 +375,13 @@ class RevisionStore:
             issue.evidence_refs = list(evidence_refs)
             issue.resolved_by = actor
             issue.resolved_at = _now()
+            still_open = any(
+                i.status == "open" for i in self._issues.values()
+                if i.case_id == issue.case_id and i.revision_id == revision_id
+            )
+            if not still_open:
+                self._snapshots[issue.case_id][revision_id].setdefault(
+                    "package_state", "ready_for_officer_review")
             response = {
                 "issue_id": issue_id,
                 "revision_id": revision_id,
@@ -452,6 +491,8 @@ class RevisionStore:
             if prior:
                 binding.superseding_approval_ref = f"{case_id}:{prior[-1].target_revision}:{prior[-1].actor}"
             self._approvals.setdefault(case_id, []).append(binding)
+            if decision == "approved":
+                self._snapshots[case_id][revision_id]["package_state"] = "approved_draft"
             seq = len(self._events.get(case_id, [])) + 1
             self._events.setdefault(case_id, []).append(
                 {"sequence": seq, "name": "APPROVAL_RECORDED", "revision_id": revision_id}
@@ -464,22 +505,30 @@ class RevisionStore:
             head = self.current(case_id)
             snap = self._snapshots[case_id][head.revision_id]
             approvals = [a.model_dump(mode="json") for a in self._approvals.get(case_id, [])]
-            open_issues = sum(
-                1 for i in self._issues.values()
-                if i.case_id == case_id and i.revision_id == head.revision_id and i.status == "open"
-            )
+            issues = [
+                i for i in self._issues.values()
+                if i.case_id == case_id and i.revision_id == head.revision_id
+            ]
+            open_issues = sum(1 for i in issues if i.status == "open")
             events = self._events.get(case_id, [])
             return {
                 "case_id": case_id,
                 "revision": head.model_dump(mode="json"),
-                "run_state": "waiting_review" if open_issues else "completed",
+                # Stored states, never derived from issue counts: run_state is
+                # what the worker last wrote; package_state advances on resolve/approve.
+                "run_state": self._run_states.get((case_id, head.revision_id), "waiting_review"),
                 "per_covenant_results": [
                     {"rule_id": head.rule_id, "threshold": head.threshold, "status": "stale" if open_issues else "current"}
                 ],
                 "coverage": {"state": "complete_for_declared_scope", "hash": head.coverage_hash},
-                "package_state": "ready_for_officer_review" if open_issues else "draft",
+                "package_state": snap.get("package_state", "draft"),
                 "package_hash": head.package_hash,
                 "open_review_issues": open_issues,
+                "review_issues": [
+                    issue_view(i.issue_id, i.status, "evidence_gap", i.decision_kind,
+                               i.rationale, i.resolved_by, i.resolved_at)
+                    for i in issues
+                ],
                 "documents": snap["documents"],
                 "approvals": approvals,
                 "last_event_sequence": events[-1]["sequence"] if events else 0,

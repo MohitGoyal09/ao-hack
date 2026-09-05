@@ -80,8 +80,12 @@ class CovenantOrchestrator:
         case_id: str,
         command: RunRequest,
         callbacks: list[Any] | None = None,
+        case: CovenantCase | None = None,
     ) -> WorkflowResult:
+        """Run the graph; *case* overrides the repository case (e.g. a revision's threshold)."""
         initial: WorkflowState = {"case_id": case_id, "command": command}
+        if case is not None:
+            initial["case"] = case
         if self._graph is not None:
             config = {"callbacks": callbacks or []}
             state = self._graph.invoke(initial, config=config)
@@ -130,7 +134,11 @@ class CovenantOrchestrator:
         builder.add_edge("assemble_evidence", "render_certificate")
         builder.add_edge("render_certificate", "finalize")
         builder.add_edge("finalize", END)
-        return builder.compile()
+        # checkpointer=False: this deterministic graph is a sub-step of the
+        # AG-UI agent graph; never inherit its checkpointer (AuditTrail and
+        # the pydantic state are not msgpack-serializable, and the result is
+        # persisted by the repository, not by LangGraph).
+        return builder.compile(checkpointer=False)
 
     @staticmethod
     def _review_route(state: WorkflowState) -> str:
@@ -141,7 +149,7 @@ class CovenantOrchestrator:
         )
 
     def _resolve_documents(self, state: WorkflowState) -> dict:
-        case = self._repository.get_case(state["case_id"])
+        case = state.get("case") or self._repository.get_case(state["case_id"])
         audit = AuditTrail(datetime.now(UTC))
         controlling = [document for document in case.documents if document.controlling]
         audit.record(

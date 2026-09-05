@@ -145,6 +145,85 @@ class CovenantApiTests(unittest.TestCase):
         self.assertEqual(wrong_hash.status_code, 409)
 
 
+    def test_run_uses_head_revision_threshold(self):
+        case_id = "beacon-gross-leverage"
+        snap = self.client.get(f"/api/cases/{case_id}/snapshot", headers=REVIEWER)
+        head = snap.json()["revision"]["revision_id"]
+        created = self.client.post(
+            f"/api/cases/{case_id}/revisions",
+            json={"expected_parent_revision": head, "change_kind": "amendment",
+                  "documents": ["amendment-4-50"], "new_threshold": 4.5},
+            headers=REVIEWER,
+        )
+        self.assertEqual(created.status_code, 200)
+        run = self.client.post(f"/api/cases/{case_id}/run", json={})
+        self.assertEqual(run.status_code, 200)
+        body = run.json()
+        self.assertEqual(body["calculation"]["threshold"], "4.50")
+        self.assertEqual(body["calculation"]["original_threshold"], "4.00")
+        self.assertEqual(body["calculation"]["ratio"], "4.17")
+        self.assertEqual(body["status"], "DRAFT_COMPLIANT")
+        # Documents accumulate across revisions; the original is never dropped.
+        docs = self.client.get(f"/api/cases/{case_id}/snapshot",
+                               headers=REVIEWER).json()["documents"]
+        self.assertIn("beacon-original", docs)
+        self.assertIn("amendment-4-50", docs)
+
+    def test_officer_approval_locks_worker_calculation_when_present(self):
+        from unittest.mock import patch
+
+        from src.covenant.pipeline import CasePipeline
+        from src.platform.storage import MemoryStorageAdapter
+        from test_pipeline import FAKE_FACTS, FAKE_RULE, _job  # discovery: -s tests
+
+        case_id = "aon-term-loan-leverage"
+        snap = self.client.get(f"/api/cases/{case_id}/snapshot", headers=OFFICER).json()
+        rev = snap["revision"]["revision_id"]
+        pipeline = CasePipeline(None, MemoryStorageAdapter(),
+                                revision_repository=revision_store)
+        version = pipeline.documents.upload(
+            organization_id="demo-org", user_id="officer-1", case_id=case_id,
+            filename="agreement.pdf", content_type="application/pdf",
+            data=b"%PDF-1.4 stand-in", document_role="credit_agreement",
+            title="Agreement",
+        )
+        job = _job(case_id, rev, version.document_id)
+        with patch("src.covenant.ingestion.extract_aon_rule", return_value=FAKE_RULE), \
+             patch("src.covenant.ingestion.extract_aon_financials", return_value=FAKE_FACTS):
+            pipeline.begin(job)
+            pipeline.run(job, on_progress=lambda: None)
+        snap = self.client.get(f"/api/cases/{case_id}/snapshot", headers=OFFICER).json()
+        self.assertEqual(snap["run_state"], "completed")
+        self.assertEqual(snap["artifacts"]["calculation"]["ratio"], "3.64")
+        issue = snap["review_issues"][0]
+        self.assertEqual(issue["status"], "open")
+        resolve = self.client.post(
+            f"/api/review-issues/{issue['issue_id']}/resolve",
+            json={"revision_id": rev, "expected_bundle_hash": snap["revision"]["input_bundle_hash"],
+                  "decision_kind": "accept_evidence", "rationale": "verified",
+                  "evidence_refs": [f"doc:{version.document_id}"],
+                  "idempotency_key": f"artifact-approval-{rev}"},
+            headers=OFFICER,
+        )
+        self.assertEqual(resolve.status_code, 200, resolve.text)
+        self.assertEqual(self.client.get(f"/api/cases/{case_id}/snapshot",
+                                         headers=OFFICER).json()["package_state"],
+                         "ready_for_officer_review")
+        approval = self.client.post(
+            f"/api/cases/{case_id}/officer-approval",
+            json={"revision_id": rev, "package_hash": snap["package_hash"],
+                  "decision": "approved", "reason": "reviewed"},
+            headers=OFFICER,
+        )
+        self.assertEqual(approval.status_code, 200, approval.text)
+        body = approval.json()
+        self.assertEqual(body["approved_ratio"], "3.64")
+        self.assertEqual(body["approved_threshold"], "4.00")
+        self.assertEqual(body["approved_inputs"]["funded_debt"], "8000.00")
+        after = self.client.get(f"/api/cases/{case_id}/snapshot", headers=OFFICER).json()
+        self.assertEqual(after["package_state"], "approved_draft")
+        self.assertFalse(after["approvals"][-1]["superseded"])
+
     def test_approval_locks_exact_numbers_and_supersedes(self):
         case_id = "aurora-net-leverage"
         snap = self.client.get(f"/api/cases/{case_id}/snapshot", headers=REVIEWER)
