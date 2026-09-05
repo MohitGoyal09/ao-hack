@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+import secrets
 import threading
 from contextlib import asynccontextmanager
+from datetime import date
 from typing import Annotated, Any
 
 from dotenv import load_dotenv
@@ -23,6 +26,7 @@ from copilotkit import LangGraphAGUIAgent
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from src.agent import build_agent_graph
 from src.platform.jobqueue import (
@@ -87,6 +91,11 @@ combined_durability_status = DurabilityStatus(
 
 # Backwards-compatible alias for tests and tooling.
 revision_store = revision_repository
+
+# Cases created from a template (POST /api/cases) resolve to their catalog
+# template wherever a case id is looked up: /run, approval, describe, agent tools.
+if revision_repository is not None:
+    workflow._repository.resolve_derived = revision_repository.case_template  # noqa: SLF001
 
 # Document intake singletons (sibling-owned contract; guarded so the app and
 # existing routes stay up when the sibling branch has not landed yet).
@@ -400,6 +409,69 @@ async def reject_business_traffic_when_unready(request, call_next):
 @app.get("/api/demo-cases")
 async def demo_cases() -> list[dict]:
     return workflow.list_cases()
+
+
+class CreateCaseRequest(BaseModel):
+    template_case_id: str
+    name: str | None = Field(default=None, max_length=240)
+    test_date: date | None = None
+
+
+@app.get("/api/cases")
+async def list_cases(
+    request: Request, principal: Principal = Depends(require_revision_principal),
+) -> list[dict]:
+    """Cases of the caller's organization(s): name, head run_state, created_at."""
+    repo = _active_revision_repository()
+    if revision_database_url() is not None:
+        org_ids = [org for org, _ in repo.member_orgs(principal.user_id)]
+    else:
+        org_ids = [_offline_org(request.headers.get("authorization"))]
+    return repo.list_cases(org_ids)
+
+
+@app.post("/api/cases")
+async def create_case(
+    body: CreateCaseRequest, request: Request,
+    principal: Principal = Depends(require_revision_principal),
+) -> dict:
+    """Create a fresh case from a curated catalog template under the caller's org."""
+    repo = _active_revision_repository()
+    authorization = request.headers.get("authorization")
+    if revision_database_url() is not None:
+        orgs = repo.member_orgs(principal.user_id)
+        if not orgs:
+            raise HTTPException(status_code=403, detail="No organization membership")
+        org_id, role = orgs[0]
+    else:
+        org_id = _offline_org(authorization)
+        role = _offline_member_role(repo, org_id, principal, authorization)
+    if role not in REVIEWER_ROLES:
+        raise HTTPException(status_code=403, detail="Insufficient role")
+    if body.template_case_id not in {c["id"] for c in workflow.list_cases()}:
+        raise HTTPException(status_code=404, detail="Unknown template case")
+    template = workflow._repository.get_case(body.template_case_id)  # noqa: SLF001
+    name = (body.name or "").strip() or template.name
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or template.id
+    for _ in range(5):  # 4-hex suffix; retry the (unlikely) collision
+        case_id = f"{slug}-{secrets.token_hex(2)}"
+        try:
+            repo.get_case_org(case_id)
+        except UnknownRevisionError:
+            break
+    else:
+        raise HTTPException(status_code=409, detail="Could not allocate a case id")
+    repo.ensure_case(
+        case_id=case_id, organization_id=org_id, user_id=principal.user_id,
+        test_date=str(body.test_date) if body.test_date else template.test_date,
+        rule_id=template.rule.id, threshold=template.rule.threshold,
+        doc_ids=[d.id for d in template.documents],
+        fact_keys=[f.key for f in template.facts],
+        name=name, borrower_name=template.name.split(":")[0].strip(),
+        facility_name=template.agreement, template_case_id=template.id,
+    )
+    return {"case_id": case_id, "organization_id": org_id,
+            "template_case_id": template.id, "name": name}
 
 
 @app.get("/api/cases/{case_id}")

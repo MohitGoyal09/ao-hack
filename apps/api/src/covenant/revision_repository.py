@@ -72,6 +72,8 @@ class RevisionRepository(Protocol):
     def get_member_role(self, organization_id: str, user_id: str) -> str | None: ...
     def get_issue_case(self, issue_id: str) -> tuple[str, str, str]: ...
     def member_orgs(self, user_id: str) -> list[tuple[str, str]]: ...
+    def case_template(self, case_id: str) -> dict | None: ...
+    def list_cases(self, organization_ids: list[str]) -> list[dict]: ...
 
 
 def _money(value: Any) -> str:
@@ -99,6 +101,7 @@ class MemoryRevisionRepository:
     def __init__(self) -> None:
         self._store = RevisionStore()
         self._case_org: dict[str, str] = {}
+        self._case_meta: dict[str, dict] = {}  # name/test_date/template/created_at
         self._members: dict[tuple[str, str], str] = {}
         self._pipeline = None  # memory CasePipeline bound for artifacts/rules/facts
 
@@ -126,11 +129,16 @@ class MemoryRevisionRepository:
                     test_date: str, rule_id: str, threshold: Any,
                     doc_ids: list[str], fact_keys: list[str], *,
                     name: str | None = None, borrower_name: str | None = None,
-                    facility_name: str | None = None) -> CaseRevision:
+                    facility_name: str | None = None,
+                    template_case_id: str | None = None) -> CaseRevision:
         existing_org = self._case_org.get(case_id)
         if existing_org is not None and existing_org != organization_id:
             raise UnknownRevisionError(case_id)
         self._case_org.setdefault(case_id, organization_id)
+        self._case_meta.setdefault(case_id, {
+            "name": name or case_id, "test_date": test_date,
+            "template_case_id": template_case_id,
+            "created_at": datetime.now(timezone.utc).isoformat()})
         if (organization_id, user_id) not in self._members:
             self._members[(organization_id, user_id)] = "treasury_reviewer"
         # RevisionStore.ensure_case is idempotent per case and takes a float
@@ -251,6 +259,22 @@ class MemoryRevisionRepository:
         return [(org, role) for (org, uid), role in self._members.items()
                 if uid == user_id]
 
+    def case_template(self, case_id: str) -> dict | None:
+        meta = self._case_meta.get(case_id)
+        return dict(meta) if meta and meta.get("template_case_id") else None
+
+    def list_cases(self, organization_ids: list[str]) -> list[dict]:
+        out = []
+        for case_id, org in self._case_org.items():
+            if org not in organization_ids:
+                continue
+            head = self._store.current(case_id).revision_id
+            out.append({"case_id": case_id, **self._case_meta[case_id],
+                        "run_state": self._store._run_states.get(  # noqa: SLF001
+                            (case_id, head), "waiting_review")})
+        out.sort(key=lambda c: c["created_at"], reverse=True)
+        return out
+
     def _require_case_org(self, case_id: str, organization_id: str) -> None:
         if self._case_org.get(case_id, organization_id) != organization_id:
             raise UnknownRevisionError(case_id)
@@ -310,7 +334,8 @@ class PostgresRevisionRepository:
                     test_date: str, rule_id: str, threshold: Any,
                     doc_ids: list[str], fact_keys: list[str], *,
                     name: str | None = None, borrower_name: str | None = None,
-                    facility_name: str | None = None) -> CaseRevision:
+                    facility_name: str | None = None,
+                    template_case_id: str | None = None) -> CaseRevision:
         threshold_s = _money(threshold)
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -323,11 +348,11 @@ class PostgresRevisionRepository:
                     cur.execute(
                         "insert into public.covenant_cases"
                         " (id, organization_id, name, borrower_name, facility_name,"
-                        " test_date, created_by) values"
-                        " (%s, %s, %s, %s, %s, %s::date, %s)",
+                        " test_date, created_by, template_case_id) values"
+                        " (%s, %s, %s, %s, %s, %s::date, %s, %s)",
                         (case_id, organization_id, name or case_id,
                          borrower_name or "borrower", facility_name or "facility",
-                         test_date, user_id),
+                         test_date, user_id, template_case_id),
                     )
                 elif str(row[0]) != str(organization_id):
                     raise UnknownRevisionError(case_id)
@@ -1078,6 +1103,40 @@ class PostgresRevisionRepository:
                     (user_id,),
                 )
                 return [(str(r[0]), r[1]) for r in cur.fetchall()]
+
+    def case_template(self, case_id: str) -> dict | None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select template_case_id, name, test_date"
+                    " from public.covenant_cases where id = %s",
+                    (case_id,),
+                )
+                row = cur.fetchone()
+                if row is None or not row[0]:
+                    return None
+                return {"template_case_id": row[0], "name": row[1],
+                        "test_date": row[2].isoformat() if row[2] else None}
+
+    def list_cases(self, organization_ids: list[str]) -> list[dict]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select c.id, c.name, c.template_case_id, c.test_date, c.created_at,"
+                    " (select r.run_state from public.case_revisions r"
+                    "  where r.case_id = c.id order by r.created_at desc limit 1)"
+                    " from public.covenant_cases c"
+                    " where c.organization_id::text = any(%s)"
+                    " order by c.created_at desc",
+                    (list(organization_ids),),
+                )
+                return [
+                    {"case_id": r[0], "name": r[1], "template_case_id": r[2],
+                     "test_date": r[3].isoformat() if r[3] else None,
+                     "created_at": r[4].isoformat() if r[4] else None,
+                     "run_state": r[5]}
+                    for r in cur.fetchall()
+                ]
 
     @staticmethod
     def _next_sequence(cur: Any, case_id: str, organization_id: str) -> int:

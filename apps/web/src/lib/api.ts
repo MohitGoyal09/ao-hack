@@ -39,6 +39,9 @@ export type Snapshot = {
   review_issues?: ReviewIssue[]; artifacts?: { calculation?: CalculationArtifact } & Record<string, unknown>; financial_facts?: unknown; covenant_rules?: unknown; revisions?: Revision[];
 };
 export type UploadResult = { document_id: string; version_id: string; version_number: number; sha256: string; extraction_state: string; revision_id: string; job_id: string };
+// GET /cases (member-scoped) and POST /cases (fresh case from a catalog template).
+export type CaseListItem = { case_id: string; name: string; template_case_id: string | null; test_date: string | null; created_at: string | null; run_state: string | null };
+export type CreatedCase = { case_id: string; organization_id: string; template_case_id: string; name: string };
 export type RevisionResult = { revision_id: string; revision: Revision; changeset: Record<string, unknown>; impact_pending: Record<string, string[]> };
 export type ImpactResult = { revision_id: string; changed_inputs: string[]; affected_rule_ids: string[]; stale_artifact_ids: string[]; review_requirements: string[]; impact: Record<string, string[]> };
 
@@ -118,6 +121,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 export const post = <T,>(path: string, body: unknown) => api<T>(path, { method: "POST", body: JSON.stringify(body) });
+export const listCases = () => api<CaseListItem[]>("/cases");
+export const createCase = (body: { template_case_id: string; name?: string; test_date?: string }) => post<CreatedCase>("/cases", body);
 
 /** busy + error state around one mutation; a 409 refreshes the caller's state and says so. */
 export function useAction(onStale?: () => Promise<void>) {
