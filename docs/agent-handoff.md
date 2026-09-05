@@ -1,6 +1,8 @@
 # Teammate handoff: Covenant Certificate
 
-Last verified: 2026-09-05 against commit `b7fefd7`, before this document update.
+Last verified: 2026-09-06 against commit `d0cc6c6` plus the uncommitted
+2026-09-06 build session described below. Counts go stale with every phase;
+re-run the baseline commands instead of trusting them.
 
 This is the main start file for a new engineer or coding agent. It replaces the
 earlier chat as execution context. Current code always wins if it conflicts with
@@ -90,18 +92,18 @@ retain their license.
 
 ## Current verified status
 
-Fresh checks on 2026-09-05:
+Fresh checks on 2026-09-06 (audit wave, at `d0cc6c6`):
 
 | Area | Status |
 |---|---|
-| Git | local `main` and `origin/main` were equal: `0 0` |
-| Backend tests | 39 of 39 passed |
-| Frontend | `npm ci` and production build passed |
-| Dependency audit | npm reported 19 issues: 6 low, 6 moderate, 7 high |
-| Supabase project | `ao-hack`, `ap-south-1`, active and linked |
-| Hosted migrations | all 4 local migrations match hosted history |
-| Database lint | local and hosted lint returned no schema errors |
-| Production readiness | not ready; real infrastructure E2E is missing |
+| Git | local `main` == `origin/main` at `d0cc6c6`; build-session work is uncommitted at the time of writing |
+| Backend tests | suite green offline (`tests/test__env.py` blanks the DB vars); the suite prints its own count (142 OK, 13 skipped on 2026-09-06) |
+| Frontend | `npm ci` and production build passed at `d0cc6c6`; workbench build passes (`/`, `/cases/[id]`, two API routes) |
+| Dependency audit | `npm audit --omit=dev`: 18 findings, 0 critical, all transitive under `next`/`hono` |
+| Supabase project | `ao-hack`, `ap-south-1`, active and linked; hosted DB, bucket and Auth verified |
+| Hosted migrations | 5 of 5 tracked migrations applied at audit; 6th (`20260906013139_langgraph_checkpoints`) applied 2026-09-06; `/health/ready` 200, all components `postgres` |
+| Hosted E2E | upload -> job -> worker -> snapshot -> review -> officer approval proven on hosted infra by the audit (checkpoint gate bypassed via a wrapper) |
+| Production readiness | not ready: no durable interrupt/resume, no event replay, no live model proof, no holdout eval |
 
 Run the baseline again instead of trusting these counts:
 
@@ -160,10 +162,9 @@ The model-backed agent has four tools:
 It is exposed at `/ag-ui`. Without credentials, an offline deterministic graph
 handles basic case requests.
 
-Important limitation: ingest accepts a server file path, parses only the Aon
-shape, does not persist the source, and does not create a revision. Re-evaluate
-does not consume newly extracted state. These are helper tools, not the complete
-production agent workflow.
+Important limitation: ingest parses only the Aon shape (it takes a
+`document_id`, rejects paths, and returns `unsupported` for anything else).
+These are helper tools, not the complete production agent workflow of Phase 5.
 
 ### Human review and change handling
 
@@ -172,13 +173,14 @@ production agent workflow.
 - Approval checks the exact current ratio, threshold, comparator, inputs,
   revision, and package hash.
 - A later revision supersedes an old approval.
-- This logic is tested but held in process memory.
+- Persisted in Postgres when `DATABASE_URL` is set (`PostgresRevisionRepository`);
+  the memory repository is explicit offline mode only.
 
 ### Infrastructure
 
 - Supabase Auth validation and run artifact persistence adapters exist.
 - The hosted `ao-hack` Supabase project exists in `ap-south-1`.
-- Four applied migrations create 17 tenant-scoped workflow tables, the private
+- Five applied migrations create 21 tenant-scoped workflow tables, the private
   bucket, RLS policies, explicit Data API grants, and the durable job queue.
 - The fourth migration removes legacy user-folder Storage access, binds child
   rows to same-tenant parents, narrows grants, validates approval hashes/numbers,
@@ -189,37 +191,81 @@ production agent workflow.
 - Memory and Postgres job stores implement lease, retry, heartbeat, cancellation,
   and stale-worker fencing.
 - LangGraph has Postgres checkpoint code and an in-memory fallback.
-- LiteLLM aliases route `covenant-fast` and `covenant-strong` to Gemini.
+- LiteLLM aliases route `covenant-fast` and `covenant-strong` to Gemini; any
+  OpenAI-compatible endpoint (NVIDIA NIM, for example) works through
+  `LITELLM_BASE_URL` + `LITELLM_API_KEY` + `LITELLM_STRONG_ALIAS`.
 - Neatlogs is optional and designed to receive identifiers, not raw documents.
 
 ### Frontend and data
 
-- Current Next.js page lists cases, runs REST calculations, and shows results,
-  evidence, clauses, traces, reviewer controls, and CopilotKit chat.
+- Landing page lists the five cases (comparison cases carry a "labelled
+  hypothetical" tag) and hosts CopilotKit chat. The `/cases/[id]` workbench
+  (2026-09-06 build session) adds sign-in, upload, job
+  timeline, review inbox, revisions/impact, officer approval and download; the
+  proxy forwards `Authorization` and multipart bodies.
 - Ten reviewed `data/gold/` labels contain source spans and reviewer metadata.
 - Gold labels test extraction only. They do not claim a compliance verdict.
+
+## 2026-09-06 build session (uncommitted while this was written)
+
+Four agents worked in parallel after an audit wave (requirements/docs truth,
+hosted backend, frontend). Everything in this list was verified by the
+integration pass on 2026-09-06 (suite 142 OK / 13 skipped, web build green,
+offline and hosted stories run through the UI proxy).
+
+- **Agent A — durability/worker.** Tracked migration
+  `20260906013139_langgraph_checkpoints.sql` (LangGraph `PostgresSaver`
+  tables, RLS on) so hosted readiness passes and `/ag-ui` mounts; `/ag-ui`
+  500 fixed by `CovenantAGUIAgent.clone()` (ag-ui-langgraph 0.0.43 vs
+  copilotkit 0.1.96 kwarg mismatch); `worker.main()` loads `.env` and uses the
+  Supabase storage adapter; terminal failure sets `run_state=failed`, retries
+  back off, `RUN_STARTED` once per job; docker-compose `worker` service and
+  Dockerfile `CMD uvicorn`; in-process offline worker thread
+  (`INPROCESS_WORKER=1` default) so offline uploads progress;
+  `tests/test__env.py` blanks DB vars so the suite is independent of `.env`.
+- **Agent B — pipeline/snapshot.** Uploaded agreement + bundled or uploaded
+  financial statement reaches a real calculation (`_finish_supported`);
+  snapshot returns `review_issues[]`, `artifacts`, `covenant_rules`,
+  `financial_facts`, `run_state` from the revision row, `package_state`
+  `approved_draft` after approval; `POST /run` honours the head revision's
+  threshold; `policy.period_mismatch_issue` turns the Aon fiscal-2023 vs
+  Q1-2024 mismatch into `NEEDS_REVIEW` with a missing-period request
+  (contract acceptance row "financial period precedes applicable testing
+  date"); uploads append to the document set.
+- **Agent C — frontend.** `/cases/[id]` workbench: Supabase sign-in
+  (`src/lib/supabase.ts`), upload, job timeline (polling), review inbox wired
+  to `resolve`, revision/impact panel with superseded approvals, officer
+  approval with locked numbers, download; proxy forwards `Authorization` +
+  multipart, `DEMO_BEARER` for offline; "labelled hypothetical" tag on
+  comparison cases; dead files removed.
+- **Agent D — docs.** README rewrite, this section, `docs/session-state.md`,
+  status-report script/doc, `data/` truth fixes, env examples (NIM option,
+  `INPROCESS_WORKER`), root `CLAUDE.md`, `docs/demo-script.md`.
+
+Phases 5 (durable interrupt/resume, live model proof), 6 (event outbox and
+replay), 8 (holdout eval) and 9 (export, ops) remain open.
 
 ## Main gaps and bugs
 
 | Priority | Gap | Consequence |
 |---|---|---|
-| P0 | ~~Global in-memory `RevisionStore`~~ done 2026-09-05: Postgres repository with reconstruction-proof tests; memory remains explicit offline mode only | persistence slice landed; hosted push of new migration pending |
+| P0 | ~~Global in-memory `RevisionStore`~~ done 2026-09-05: Postgres repository with reconstruction-proof tests; memory remains explicit offline mode only | migration applied hosted 2026-09-06 |
 | P0 | ~~Revision/review/approval routes lack auth~~ done 2026-09-05: server identity, org membership, reviewer/officer roles, 401/403/404/409 | same as above |
-| P0 | Queue is not wired to API execution | runs execute inline; no worker consumes durable jobs |
-| P0 | Postgres/checkpoint packages are absent from `pyproject.toml` | configured durability can silently fall back to memory |
-| P0 | Configured durability catches broad errors | a broken database can look like a working offline system |
-| P0 | No upload API or immutable intake transaction | agent accepts unsafe server paths and bypasses Storage/versioning |
-| P0 | Extracted data is not authoritative revision state | upload, review, and recalculation are not one E2E flow |
+| P0 | ~~Queue is not wired to API execution~~ done `d0cc6c6`: `src/platform/worker.py` + `CasePipeline` | worker fixes (real storage adapter, `.env`, compose `worker` service) in the 2026-09-06 session; real worker entrypoint processed a hosted upload during integration |
+| P0 | ~~Postgres/checkpoint packages are absent from `pyproject.toml`~~ done `70617af` | pinned `psycopg`, `langgraph-checkpoint-postgres` |
+| P0 | ~~Configured durability catches broad errors~~ done `70617af` | fail-closed readiness, `/health/live`, `/health/ready` |
+| P0 | ~~No upload API or immutable intake transaction~~ done `b2086ed` | `POST /documents`, `GET /documents/{id}`, agent tool takes `document_id` |
+| P0 | ~~Extracted data is not authoritative revision state~~ done `d0cc6c6` + 2026-09-06 session | pipeline persists rules/facts/artifacts per revision; snapshot exposes them and `/run` honours the head revision (verified offline and hosted 2026-09-06) |
 | P1 | No durable event outbox and replay | reconnect cannot restore exact progress |
 | P1 | AG-UI route exists but custom domain events do not | UI cannot show real node/tool/review progress |
 | P1 | No durable LangGraph interrupt/resume review | human review is REST state, not a paused agent execution |
 | P1 | Parser supports one Aon pattern | arbitrary agreements and amendment chains do not work |
 | P1 | No real Gemini/LiteLLM proof | tool calls, structured output, retries, cost data unverified |
-| P1 | Schema is hosted but backend repositories are not wired to it | hosted RLS, persistence, Storage, queue, and restart behavior are not yet E2E proven |
-| P1 | Frontend misses intake, revisions, event replay, full review inbox | production workflow cannot be completed in UI |
+| P1 | ~~Schema is hosted but backend repositories are not wired to it~~ proven 2026-09-06 audit | upload -> worker -> approval ran on hosted Postgres/Storage/Auth; restart recovery still only covered by the opt-in integration test |
+| P1 | Frontend misses intake, revisions, review inbox, approval — `/cases/[id]` workbench landed 2026-09-06 | event replay still missing (polling only) |
 | P2 | No untouched agreement family or final calculation labels | product accuracy is not measured |
 | P2 | No PDF workpaper export | certificate is a JSON draft object |
-| P2 | npm audit has 19 findings | must be triaged before a security claim |
+| P2 | npm audit has 18 findings (`--omit=dev`), 0 critical, all transitive | must be triaged before a security claim |
 
 ## Target production flow
 

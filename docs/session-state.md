@@ -1,64 +1,69 @@
-# Session state (picked up 2026-09-05)
+# Session state (updated 2026-09-06)
+
+Short pointer file. `docs/agent-handoff.md` is the execution packet and wins
+over this file; current code wins over both.
 
 ## Project
-Covenant Certificate. Track 2 hack entry. Borrower-side loan-rule report helper.
+Covenant Certificate. Track 2 hack entry. Borrower-side loan-covenant
+compliance-certificate draft helper with human review and officer approval.
 Repo: https://github.com/MohitGoyal09/ao-hack.git
 
 ## Decisions made
 - Production pipeline first, demo polish later.
-- Demo will run on the real papers in `data/raw/`, not only hand-typed cases.
-- LLMs go through LiteLLM gateway on Gemini only.
-  Fast alias `covenant-fast` = `gemini/gemini-2.5-flash`.
-  Strong alias `covenant-strong` = `gemini/gemini-2.5-pro`.
-  Single key: `GEMINI_API_KEY`. Agent talks to the gateway in OpenAI-compatible
-  form, so `apps/api/src/agent.py` needed no change.
+- One real-source case (Aon) exists for extraction; its period mismatch means
+  it is a `NEEDS_REVIEW` extraction demo, never a verdict. Other cases are
+  synthetic; the two-agreement comparison is a labelled hypothetical.
+- Model access is any OpenAI-compatible endpoint (`LITELLM_BASE_URL`,
+  `LITELLM_API_KEY`, `LITELLM_STRONG_ALIAS`): NVIDIA NIM directly, or Gemini
+  through the optional LiteLLM proxy. No key = offline deterministic graph.
+- The model never calculates, accepts evidence, approves, or signs.
 
-## Done and tested in code
-- Fixed money math (`src/covenant/calculator.py`). Decimal rounding, no eval,
-  no model-written verdict. Tested: 3.14 pass, 4.17 breach, amendment 4.25.
-- Strict checker (`src/covenant/policy.py`). Blocks on missing facts, unclear
-  controlling paper, missing clause proof, unnamed or reason-free reviewer calls.
-- Linked audit trail (`src/covenant/audit.py` + `hashing.py`). Hash-chained.
-- LangGraph flow with 9 steps plus a plain sequential fallback for tests.
-- Chat helper (`src/agent.py`). Two tools only: list cases, run calculator.
-  Fixed offline script when no model key is set.
-- Login plus file saving to Supabase, private bucket, access rules
-  (`src/platform/supabase.py`, `apps/api/supabase/migrations/202609050001_covenant_certificate.sql`).
-- Redacted Neatlogs tracing (`src/platform/observability.py`). IDs only.
-- Next.js thin UI (`apps/web/src/app/page.tsx`). Four practice cases, run,
-  approve/reject buttons, proof list, clause list, trace list, CopilotChat.
-- `docker-compose.yml`: litellm 4000, api 8123, web 3000.
+## Done (see handoff "What is implemented" and "2026-09-06 build session")
+- Decimal calculator, fail-closed policy (incl. period mismatch), hash-chained
+  trace, 9-node LangGraph, full rule checklist with explicit coverage.
+- Aon PDF + 10-K extraction with page/section citations.
+- Revisions, impact, stale-command 409s, idempotency, officer approval locked
+  to exact numbers; Postgres repository when `DATABASE_URL` is set.
+- Authenticated immutable document intake (object + version + revision +
+  event + job); durable job queue with fencing; worker + case pipeline.
+- Fail-closed durability readiness; LangGraph checkpoint migration.
+- 10 reviewed extraction-only gold labels with dataset-gate tests.
+- `/cases/[id]` workbench (sign-in, upload, jobs, review, revisions,
+  approval, download); production build passes.
 
-## Main gaps (production work, in order)
-1. Nothing reads real bank papers. All demo numbers are hand-typed in
-   `src/covenant/catalog.py`. No PDF library in `apps/api/pyproject.toml`.
-2. One rule checked per case. Other loan rules are skipped silently.
-   Need a full rule list with skipped rules shown as skipped.
-3. No memory of changes. A new paper must mark old answers outdated and
-   expire old approvals. Missing: version records, revision APIs,
-   stale-command 409 rejection, idempotency keys.
-4. Agent cannot touch new documents. Only list plus run tools exist.
-5. No locking sign-off tied to exact approved numbers.
-6. Money travels as JSON floats. Contract wants exact strings.
-7. Agent memory is in-RAM only (`MemorySaver`). No job queue with retries.
-8. `data/gold/` and `data/derived/` are empty. `data/case-readiness.json`
-   self-reports `full_verdict_not_ready`. No reviewed labels yet.
-9. Stale pytest cache points at deleted `tests/test_covenant.py`.
-   New suite (`test_covenant_workflow.py`, `test_main_api.py`,
-   `test_platform.py`) still needs a green run with real deps.
+## Main gaps (current)
+1. No durable LangGraph `interrupt`/resume: review is REST state, not a
+   paused graph execution that survives restart (Phase 5).
+2. Live model proof is a single observed session (2026-09-06, NVIDIA NIM
+   `nvidia/nemotron-3-super-120b-a12b`: list -> run -> 3.14x matching the
+   calculator, directly and over `/ag-ui`); no automated test covers it, and
+   the offline deterministic graph is what runs without a key.
+3. No event outbox / AG-UI replay: the UI polls `jobs` and `snapshot`
+   (Phase 6).
+4. Parser covers one agreement shape (Aon); everything else is `unsupported`
+   or `needs_ocr`. No OCR.
+5. No holdout agreement family; false-pass count is on the curated set only
+   (Phase 8).
+6. Export is a JSON draft package; no marked PDF workpaper (Phase 9).
+7. Neatlogs wired but never exercised with a key.
+8. npm audit: 18 transitive findings (0 critical) untriaged.
+9. No case-creation API; demo cases are seeded per organization on first
+   snapshot read. No user/org seed script (manual Auth admin + SQL inserts).
 
 ## Next steps
-1. Hand-enter one real loan rule plus matching numbers so a real answer
-   flows through the same code.
-2. Teach the backend to open that agreement file and pull the rule,
-   with a person checking its work.
-3. Add change memory (new paper expires old answers and approvals).
-4. Add the full rule checklist.
-5. Add the locking sign-off, then rebuild the demo on the real flow.
+1. Push the 2026-09-06 build-session commits; record the demo video from
+   `docs/demo-script.md`.
+2. (done) Checkpoint migration applied to hosted; `/health/ready` 200 and
+   `/ag-ui` mounted, verified 2026-09-06.
+3. Record the demo (`docs/demo-script.md`) with the AO dashboard shot.
+4. Optional before recording: one live NIM tool-calling run; otherwise say
+   "model path configured, not exercised".
+5. After the hackathon: Phase 5 interrupt/resume, Phase 6 replay, Phase 8
+   holdout eval, Phase 9 export/ops.
 
 ## Run and verify
-- `docker compose up --build`, open http://localhost:3000, health at :8123.
 - Backend: `cd apps/api && uv sync --frozen && uv run python -m unittest discover -s tests -v`
-- Web: `cd apps/web && npm ci && npm run build`
-- Model on: set `GEMINI_API_KEY` in `.env`. Persistence on: set Supabase vars
-  and apply the migration. Everything stays runnable offline without them.
+  (offline regardless of `.env`; `COVENANT_TEST_KEEP_ENV=1` keeps it).
+- API: `uv run uvicorn main:app --port 8123`; worker: `uv run python -m src.platform.worker`.
+- Web: `cd apps/web && npm ci && npm run build` (or `npm run dev`).
+- Compose: `docker compose up --build` (litellm, api, worker, web).

@@ -1,15 +1,16 @@
 {
   "schema_version": 1,
-  "assessed_at": "2026-09-05",
+  "assessed_at": "2026-09-06",
   "status": "component_sources_available_full_verdict_not_ready",
   "labels_status": "extraction_only_gold_reviewed_2026-09-05_no_verdict_labels",
   "blockers": [
-    "locking sign-off pending (gap 5, concurrent worker, not merged at assessment time)",
     "no coherent test-date package: closing evidence, matching-period financials, amendment chain, certificate body still missing per package",
     "held-out set empty: new untouched agreement family still required"
   ],
   "unblocked_since_last_assessment": [
-    "rule checklist merged (gap 2) - no longer a blocker"
+    "rule checklist merged (gap 2) - no longer a blocker",
+    "locking sign-off merged (gap 5, c25fb12) - officer approval binds exact ratio, threshold, comparator, inputs, package hash",
+    "period mismatch is now a deterministic policy check: a fact period that does not end on the covenant measurement period yields NEEDS_REVIEW with a missing-period request (landed 2026-09-06; POST /run on aon-term-loan-leverage returns NEEDS_REVIEW)"
   ],
   "holdout_status": "new_agreement_family_required",
   "packages": [
@@ -28,7 +29,8 @@
         "Verify governing amendments for test date",
         "Locate actual certificate form body"
       ],
-      "source_financial_period": "2023 annual; precedes selected agreement"
+      "source_financial_period": "2023 annual; precedes selected agreement",
+      "period_mismatch_note": "Fiscal-2023 10-K facts precede the first Q1-2024 measurement period of the 2024 term loan. The aon-term-loan-leverage case therefore returns NEEDS_REVIEW (period mismatch), never DRAFT_COMPLIANT or DRAFT_BREACH. It demonstrates extraction, not compliance."
     },
     {
       "id": "citizens-2021",

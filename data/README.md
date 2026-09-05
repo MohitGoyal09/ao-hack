@@ -2,7 +2,7 @@
 
 This folder contains public-company filing material selected for parser, retrieval, cross-reference, financial-period, and amendment tests.
 
-Read `case-readiness.json` and `../docs/implementation-contract.md` first. No package currently establishes a reviewed, temporally coherent full covenant verdict. The financial files precede the corresponding selected agreements. Existing sources are development material, not an untouched holdout set.
+Read `case-readiness.json` and `../docs/implementation-contract.md` first. No package currently establishes a reviewed, temporally coherent full covenant verdict. The financial files precede the corresponding selected agreements. The application detects this period mismatch and returns `NEEDS_REVIEW` for the Aon case rather than a verdict. Existing sources are development material, not an untouched holdout set.
 
 ## Rules
 
@@ -16,7 +16,7 @@ Read `case-readiness.json` and `../docs/implementation-contract.md` first. No pa
   definition maps, mismatch findings, split plan), traceable to `raw/`.
 - A public filing is evidence, not a gold answer.
 - Do not publish extracted legal conclusions as professional advice.
-- Recheck redistribution rights before making the repository public. The current repository is private.
+- Everything under `raw/sec/` is a public record from SEC EDGAR (URLs and SHA-256 in `manifest.json`); the `raw/pdf-fixtures/` PDFs are credit-agreement exhibits redistributed by the public nlm-ingestor repository for parser testing (the Citizens PDF's direct SEC exhibit URL is still unresolved; see `manifest.json`). The repository is public for judging. Add nothing to `raw/` that is not a public filing or a synthetic fixture.
 
 ## Selected packages
 

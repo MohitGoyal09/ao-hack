@@ -79,6 +79,14 @@ Never edit a migration that has already reached the hosted database.
 
 ## Current database proof
 
+Update 2026-09-06 (hosted audit): 5 of 5 tracked migrations applied, 21 public
+tables, private bucket confirmed, email/password Auth on, and the full
+upload -> job -> worker -> snapshot -> review -> officer-approval path ran on
+the hosted project. A sixth migration (`20260906013139_langgraph_checkpoints`)
+adds the LangGraph checkpoint tables that readiness requires; it was applied to
+the hosted project on 2026-09-06 (`supabase migration list --linked` 6/6,
+`GET /health/ready` 200 with checkpoint mode `postgres`).
+
 On 2026-09-05:
 
 - all four repository migrations matched hosted migration history;
