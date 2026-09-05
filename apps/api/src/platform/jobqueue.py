@@ -135,11 +135,17 @@ def _utcnow() -> datetime:
 
 
 class MemoryJobStore:
-    """Thread-safe in-memory store implementing queue/lease/fencing semantics."""
+    """Thread-safe in-memory store implementing queue/lease/fencing semantics.
 
-    def __init__(self) -> None:
+    Retry backoff: a retryable ``fail`` re-queues the job with
+    ``lease_expires_at = now + attempt_count * retry_backoff_seconds``; ``lease``
+    treats that timestamp as "not before" for queued jobs.
+    """
+
+    def __init__(self, retry_backoff_seconds: float = 10) -> None:
         self._lock = threading.Lock()
         self._jobs: dict[str, Job] = {}
+        self.retry_backoff_seconds = retry_backoff_seconds
 
     def enqueue(self, case_id: str, revision_id: str, payload: dict | None = None,
                 max_attempts: int = 5) -> Job:
@@ -205,9 +211,10 @@ class MemoryJobStore:
                 job.lease_owner = None
                 job.lease_expires_at = None
             else:
-                job.state = "queued"  # retryable; lease released
+                job.state = "queued"  # retryable; lease released, backoff applied
                 job.lease_owner = None
-                job.lease_expires_at = None
+                job.lease_expires_at = _utcnow() + timedelta(
+                    seconds=job.attempt_count * self.retry_backoff_seconds)
             return job
 
     def cancel(self, job_id: str) -> Job:
@@ -308,8 +315,8 @@ class PostgresJobStore(MemoryJobStore):
                     " lease_owner=%s, lease_expires_at=now() + (%s || ' seconds')::interval,"
                     " attempt_count=attempt_count+1, fencing_token=fencing_token+1"
                     " where id = (select id from public.revision_run_jobs"
-                    " where (state='queued' or (state='running' and"
-                    " (lease_expires_at is null or lease_expires_at <= now())))"
+                    " where state in ('queued', 'running')"
+                    " and (lease_expires_at is null or lease_expires_at <= now())"
                     " order by created_at limit 1 for update skip locked)"
                     f" returning {self._COLS}",
                     (worker_id, str(lease_seconds)),
@@ -367,10 +374,10 @@ class PostgresJobStore(MemoryJobStore):
         return self._guarded_update(
             job_id, fencing_token,
             "last_error=%s, state = case when attempt_count >= max_attempts"
-            " then 'failed' else 'queued' end,"
-            " lease_owner = case when attempt_count >= max_attempts"
-            " then null else null end, lease_expires_at=null",
-            (error,))
+            " then 'failed' else 'queued' end, lease_owner = null,"
+            " lease_expires_at = case when attempt_count >= max_attempts then null"
+            " else now() + make_interval(secs => attempt_count * %s) end",
+            (error, float(self.retry_backoff_seconds)))
 
     def cancel(self, job_id: str) -> Job:
         with self._conn().cursor() as cur:

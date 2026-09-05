@@ -113,7 +113,7 @@ class WorkerTest(unittest.TestCase):
         self.assertNotEqual(current.payload, expected)
 
     def test_transient_error_retries_then_succeeds(self):
-        store = MemoryJobStore()
+        store = MemoryJobStore(retry_backoff_seconds=0)
         job = store.enqueue("case-a", "rev-1")
 
         class FlakyPipeline:
@@ -214,6 +214,101 @@ class WorkerTest(unittest.TestCase):
         worker = Worker(store, StaleHeartbeatPipeline(), "worker-1")
         outcome = worker.run_once()
         self.assertEqual(outcome, "stale")
+
+
+class RevisionAwarePipeline(HappyPipeline):
+    """Fake exposing the CasePipeline private hooks the worker calls."""
+
+    def __init__(self, fail_times=0, permanent=False):
+        super().__init__()
+        self.fail_times = fail_times
+        self.permanent = permanent
+        self.run_states: list[tuple] = []
+        self.events: list[tuple] = []
+
+    def _resolve_org(self, job):
+        return "org-1"
+
+    def set_run_state(self, job, state):
+        self.run_states.append(("org-1", job.case_id, job.revision_id, state))
+
+    def _append_event(self, case_id, org, revision_id, run_id, event_type, summary):
+        self.events.append((event_type, dict(summary)))
+
+    def run(self, job, on_progress):
+        self.run_calls.append(job.id)
+        if self.permanent:
+            raise PermanentRunError("bad input")
+        if len(self.run_calls) <= self.fail_times:
+            raise TransientRunError("boom")
+        return self._result
+
+
+class WorkerRevisionStateTest(unittest.TestCase):
+    def test_retry_emits_run_retried_and_begins_once(self):
+        store = MemoryJobStore(retry_backoff_seconds=0)
+        store.enqueue("case-a", "rev-1")
+        pipeline = RevisionAwarePipeline(fail_times=1)
+        worker = Worker(store, pipeline, "worker-1")
+        self.assertEqual(worker.run_once(), "retrying")
+        self.assertEqual(worker.run_once(), "completed")
+        self.assertEqual(len(pipeline.begin_calls), 1)
+        self.assertEqual([e[0] for e in pipeline.events], ["RUN_RETRIED"])
+        self.assertEqual(pipeline.events[0][1]["attempt"], 2)
+        self.assertEqual(pipeline.run_states, [])
+
+    def test_terminal_failure_marks_revision_failed(self):
+        store = MemoryJobStore(retry_backoff_seconds=0)
+        store.enqueue("case-a", "rev-1", max_attempts=2)
+        pipeline = RevisionAwarePipeline(fail_times=5)
+        worker = Worker(store, pipeline, "worker-1")
+        self.assertEqual(worker.run_once(), "retrying")
+        self.assertEqual(worker.run_once(), "failed")
+        self.assertEqual(pipeline.run_states, [("org-1", "case-a", "rev-1", "failed")])
+
+    def test_permanent_error_marks_revision_failed(self):
+        store = MemoryJobStore()
+        store.enqueue("case-a", "rev-1")
+        pipeline = RevisionAwarePipeline(permanent=True)
+        self.assertEqual(Worker(store, pipeline, "worker-1").run_once(), "failed")
+        self.assertEqual(pipeline.run_states[-1][3], "failed")
+
+    def test_cancel_during_run_marks_revision_cancelled(self):
+        store = MemoryJobStore()
+        job = store.enqueue("case-a", "rev-1")
+        pipeline = RevisionAwarePipeline()
+        original_run = pipeline.run
+
+        def cancelling_run(j, on_progress):
+            store.cancel(j.id)
+            return original_run(j, on_progress)
+
+        pipeline.run = cancelling_run
+        self.assertEqual(Worker(store, pipeline, "worker-1").run_once(), "cancelled")
+        self.assertEqual(store.get(job.id).state, "cancelled")
+        self.assertEqual(pipeline.run_states[-1][3], "cancelled")
+
+    def test_run_forever_stops_on_event(self):
+        import threading
+
+        store = MemoryJobStore()
+        store.enqueue("case-a", "rev-1")
+        pipeline = HappyPipeline()
+        stop = threading.Event()
+        thread = threading.Thread(
+            target=Worker(store, pipeline, "worker-1").run_forever,
+            kwargs={"poll_interval_seconds": 0.01, "stop_event": stop},
+            daemon=True,
+        )
+        thread.start()
+        deadline = 50
+        while not pipeline.run_calls and deadline:
+            stop.wait(0.02)
+            deadline -= 1
+        stop.set()
+        thread.join(timeout=2)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(pipeline.run_calls), 1)
 
 
 if __name__ == "__main__":

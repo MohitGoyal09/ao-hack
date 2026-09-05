@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import threading
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
@@ -29,6 +31,7 @@ from src.platform.jobqueue import (
     DurabilityRuntime,
     DurabilityStatus,
     JobConflictError,
+    MemoryJobStore,
     build_durability_runtime,
 )
 from src.covenant import RunRequest, UnknownCaseError, build_demo_workflow
@@ -266,9 +269,46 @@ def _ensure_revisions(case_id: str, principal: Principal,
     return org_id
 
 
+def _start_inprocess_worker(app: FastAPI) -> threading.Event | None:
+    """Offline demo only: drain the MemoryJobStore from a daemon thread.
+
+    Without a database there is no separate worker process, so uploads would
+    sit at ``queued`` forever. INPROCESS_WORKER=0 disables it (tests that
+    assert ``queued`` run without lifespan anyway). Postgres mode never runs
+    this: the real worker is ``python -m src.platform.worker``.
+    """
+    store = getattr(getattr(app.state, "durability_runtime", None), "job_store", None)
+    if (os.getenv("INPROCESS_WORKER", "1") != "1"
+            or type(store) is not MemoryJobStore or _documents is None):
+        return None
+    from src.covenant.pipeline import CasePipeline
+    from src.platform.worker import Worker
+
+    # Share the route's memory revision repo (RUN_* events, run_state and
+    # artifacts show in the snapshot) and its in-memory document index.
+    pipeline = CasePipeline(
+        None, _storage,
+        revision_repository=revision_repository
+        if isinstance(revision_repository, MemoryRevisionRepository) else None,
+    )
+    # ponytail: documents shared by attribute; add a ctor kwarg if a third caller appears.
+    pipeline.documents = _documents
+    stop = threading.Event()
+    threading.Thread(
+        target=Worker(store, pipeline, worker_id="inprocess").run_forever,
+        kwargs={"poll_interval_seconds": 0.5, "stop_event": stop},
+        name="inprocess-worker",
+        daemon=True,
+    ).start()
+    return stop
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    stop_worker = _start_inprocess_worker(app)
     yield
+    if stop_worker is not None:
+        stop_worker.set()
     runtime = getattr(app.state, "durability_runtime", None)
     if runtime is not None:
         runtime.close()

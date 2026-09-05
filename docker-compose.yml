@@ -13,7 +13,7 @@ services:
   api:
     build:
       context: ./apps/api
-    environment:
+    environment: &api_env
       DATABASE_URL: ${DATABASE_URL:-}
       MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -29,10 +29,19 @@ services:
       NEATLOGS_ENDPOINT: ${NEATLOGS_ENDPOINT:-https://ingest.neatlogs.com}
       NEATLOGS_WORKFLOW_NAME: ${NEATLOGS_WORKFLOW_NAME:-covenant-certificate}
       PORT: 8123
+    volumes:
+      - ./data/raw:/app/data/raw:ro
     ports:
       - "8123:8123"
     depends_on:
       - litellm
+  worker:
+    build:
+      context: ./apps/api
+    command: uv run python -m src.platform.worker
+    environment: *api_env
+    volumes:
+      - ./data/raw:/app/data/raw:ro
   web:
     build:
       context: ./apps/web

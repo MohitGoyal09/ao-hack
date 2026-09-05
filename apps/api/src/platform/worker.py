@@ -7,7 +7,7 @@ granted. Any StaleLeaseError surfaces as "stale" without further publishing.
 from __future__ import annotations
 
 import logging
-import time
+import threading
 from typing import Any
 
 from src.platform.jobqueue import StaleLeaseError
@@ -41,13 +41,27 @@ class Worker:
         job = self._store.lease(self._worker_id, self._lease_seconds)
         if job is None:
             return "idle"
+        outcome = self._process(job)
+        # Every terminal outcome routes through here, so the revision's
+        # run_state can never be left at 'running' by a failed or cancelled job.
+        if outcome in ("failed", "cancelled"):
+            self._mark_revision(job, outcome)
+        return outcome
+
+    def _process(self, job: Any) -> str:
         job_id = job.id
         token = job.fencing_token
         logger.info("worker leased job job_id=%s worker_id=%s", job_id, self._worker_id)
 
         # --- begin phase: same retry/terminal mapping as run phase ---
         try:
-            self._pipeline.begin(job)
+            if job.attempt_count > 1:
+                # RUN_STARTED is emitted once per job (by begin); retries only annotate.
+                self._emit(job, "RUN_RETRIED",
+                           {"job_id": job_id, "attempt": job.attempt_count,
+                            "last_error": job.last_error})
+            else:
+                self._pipeline.begin(job)
         except StaleLeaseError:
             logger.info("worker stale job_id=%s worker_id=%s", job_id, self._worker_id)
             return "stale"
@@ -139,13 +153,43 @@ class Worker:
         logger.info("worker failed job_id=%s worker_id=%s", job_id, self._worker_id)
         return "failed"
 
+    def _mark_revision(self, job: Any, state: str) -> None:
+        """Best effort: terminal job outcome -> case_revisions.run_state via the
+        pipeline's public ``set_run_state(job, state)`` hook (absent on test fakes)."""
+        setter = getattr(self._pipeline, "set_run_state", None)
+        if setter is None:
+            return
+        try:
+            setter(job, state)
+        except Exception:
+            logger.warning("worker could not set run_state=%s job_id=%s",
+                           state, job.id, exc_info=True)
+
+    # ponytail: RUN_RETRIED goes through CasePipeline's private event sink via
+    # getattr (no public hook yet); promote to one if a second pipeline appears.
+    def _emit(self, job: Any, event_type: str, summary: dict) -> None:
+        """Best effort: append a RUN_* domain event through the pipeline's sink."""
+        append = getattr(self._pipeline, "_append_event", None)
+        resolve = getattr(self._pipeline, "_resolve_org", None)
+        if append is None or resolve is None:
+            return
+        try:
+            append(job.case_id, resolve(job), job.revision_id, job.id,
+                   event_type, dict(summary))
+        except Exception:
+            logger.warning("worker could not append %s job_id=%s",
+                           event_type, job.id, exc_info=True)
+
     def run_forever(
         self,
         poll_interval_seconds: float = 5,
         stop_after_idle: int | None = None,
+        stop_event: threading.Event | None = None,
     ) -> None:
+        """Poll until ``stop_event`` is set (or ``stop_after_idle`` idle polls)."""
+        stop_event = stop_event or threading.Event()
         idle_count = 0
-        while True:
+        while not stop_event.is_set():
             outcome = self.run_once()
             if outcome == "idle":
                 idle_count += 1
@@ -154,7 +198,8 @@ class Worker:
             if stop_after_idle is not None and idle_count >= stop_after_idle:
                 return
             if poll_interval_seconds and poll_interval_seconds > 0:
-                time.sleep(poll_interval_seconds)
+                if stop_event.wait(poll_interval_seconds):
+                    return
 
 
 def main() -> None:
@@ -162,7 +207,13 @@ def main() -> None:
     import os
     import uuid
 
+    from dotenv import load_dotenv
+
+    load_dotenv()  # same root .env main.py loads; never overrides exported vars
+    logging.basicConfig(level=os.getenv("WORKER_LOG_LEVEL", "INFO"))
+
     from src.platform.jobqueue import configured_database_url, job_store_from_env
+    from src.platform.supabase import SupabasePlatform
 
     worker_id = os.getenv("WORKER_ID", f"worker-{uuid.uuid4().hex[:8]}")
     try:
@@ -179,7 +230,12 @@ def main() -> None:
 
     from src.platform.storage import storage_adapter_from_env
 
-    storage = storage_adapter_from_env(None)
+    # The API uploads to Supabase Storage; read from the same bucket.
+    platform = SupabasePlatform.from_env()
+    storage = storage_adapter_from_env(
+        platform._client if platform.enabled else None,  # noqa: SLF001
+        platform._bucket,  # noqa: SLF001
+    )
     pipeline = _Pipeline(configured_database_url(), storage)
     worker = Worker(store, pipeline, worker_id=worker_id, lease_seconds=lease_seconds)
     worker.run_forever(poll_interval_seconds=poll_interval)

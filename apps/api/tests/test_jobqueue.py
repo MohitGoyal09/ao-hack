@@ -52,13 +52,28 @@ class JobQueueTest(unittest.TestCase):
         self.assertEqual(done.state, "completed")
 
     def test_fail_retries_until_max_attempts(self):
-        job = self.store.enqueue("case-a", "rev-1", max_attempts=2)
+        store = MemoryJobStore(retry_backoff_seconds=0)
+        job = store.enqueue("case-a", "rev-1", max_attempts=2)
+        leased = store.lease("worker-1")
+        retry = store.fail(job.id, leased.fencing_token, "boom")
+        self.assertEqual(retry.state, "queued")
+        leased2 = store.lease("worker-1")
+        final = store.fail(job.id, leased2.fencing_token, "boom again")
+        self.assertEqual(final.state, "failed")
+        self.assertIsNone(final.lease_expires_at)
+
+    def test_fail_applies_retry_backoff_before_release(self):
+        from datetime import datetime, timezone
+
+        job = self.store.enqueue("case-a", "rev-1")
         leased = self.store.lease("worker-1")
         retry = self.store.fail(job.id, leased.fencing_token, "boom")
         self.assertEqual(retry.state, "queued")
-        leased2 = self.store.lease("worker-1")
-        final = self.store.fail(job.id, leased2.fencing_token, "boom again")
-        self.assertEqual(final.state, "failed")
+        self.assertGreater(retry.lease_expires_at, datetime.now(timezone.utc))
+        # Default backoff is attempt_count * 10s; not leasable until it passes.
+        self.assertIsNone(self.store.lease("worker-1"))
+        retry.lease_expires_at = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        self.assertEqual(self.store.lease("worker-1").attempt_count, 2)
 
     def test_heartbeat_rejects_stale_token(self):
         job = self.store.enqueue("case-a", "rev-1")
