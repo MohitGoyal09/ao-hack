@@ -134,5 +134,83 @@ class CovenantApiTests(unittest.TestCase):
         self.assertEqual(wrong_hash.status_code, 409)
 
 
+    def test_approval_locks_exact_numbers_and_supersedes(self):
+        from main import revision_store
+
+        case_id = "aurora-net-leverage"
+        snap = self.client.get(f"/api/cases/{case_id}/snapshot")
+        self.assertEqual(snap.status_code, 200)
+        rev1 = snap.json()["revision"]["revision_id"]
+        bundle = snap.json()["revision"]["input_bundle_hash"]
+        # Resolve the seeded blocking issue so approval can proceed.
+        issue_id = f"{case_id}-evidence-1"
+        if "rev-1" not in rev1:
+            issue_id = f"{case_id}-{rev1}-evidence-1"
+        else:
+            # ensure_case may already exist from another test; resolve whatever is open.
+            pass
+        resolve = self.client.post(
+            f"/api/review-issues/{issue_id}/resolve",
+            json={"revision_id": rev1, "expected_bundle_hash": bundle,
+                  "decision_kind": "accept_evidence", "rationale": "verified",
+                  "evidence_refs": ["doc:aurora-original"],
+                  "idempotency_key": f"lock-test-{rev1}-1"},
+        )
+        self.assertEqual(resolve.status_code, 200)
+
+        snap2 = self.client.get(f"/api/cases/{case_id}/snapshot")
+        package_hash = snap2.json()["package_hash"]
+        threshold = snap2.json()["revision"]["threshold"]
+
+        # Drifted threshold in the officer-seen numbers -> 409 naming the number.
+        drifted = self.client.post(
+            f"/api/cases/{case_id}/officer-approval",
+            json={"revision_id": rev1, "package_hash": package_hash,
+                  "actor": "officer-1", "role": "officer",
+                  "decision": "approved", "reason": "drift check",
+                  "approved_threshold": "3.75"},
+        )
+        self.assertEqual(drifted.status_code, 409)
+        self.assertIn("threshold changed from 3.75", drifted.json()["detail"])
+
+        # Correct numbers lock in; response carries legible summary.
+        approval = self.client.post(
+            f"/api/cases/{case_id}/officer-approval",
+            json={"revision_id": rev1, "package_hash": package_hash,
+                  "actor": "officer-1", "role": "officer",
+                  "decision": "approved", "reason": "reviewed",
+                  "approved_threshold": threshold},
+        )
+        self.assertEqual(approval.status_code, 200)
+        body = approval.json()
+        self.assertIn("approved_threshold", body)
+        self.assertIn("approved_inputs", body)
+        self.assertIn("locked_summary", body)
+        self.assertIn("this approval locked in:", body["locked_summary"])
+        self.assertIn(threshold, body["locked_summary"])
+        self.assertIsInstance(body["approved_threshold"], str)
+
+        # New revision supersedes the prior approval...
+        created = self.client.post(
+            f"/api/cases/{case_id}/revisions",
+            json={"expected_parent_revision": rev1, "change_kind": "amendment",
+                  "documents": ["amendment-9"], "new_threshold": 4.25},
+        )
+        self.assertEqual(created.status_code, 200)
+        rev2 = created.json()["revision_id"]
+        approvals = revision_store.snapshot(case_id)["approvals"]
+        old = [a for a in approvals if a["target_revision"] == rev1]
+        self.assertTrue(old and all(a["superseded"] for a in old))
+
+        # ...and the superseded approval can never re-authorize, even with its old hash.
+        reused = self.client.post(
+            f"/api/cases/{case_id}/officer-approval",
+            json={"revision_id": rev1, "package_hash": package_hash,
+                  "actor": "officer-1", "role": "officer",
+                  "decision": "approved", "reason": "reused"},
+        )
+        self.assertEqual(reused.status_code, 409)
+
+
 if __name__ == "__main__":
     unittest.main()
