@@ -51,7 +51,12 @@ The main demonstration shows an amendment or financial update changing a case, t
 - [ ] Map AG-UI events to a reducer with sequence and replay protection.
 - [ ] Use revision IDs and a snapshot cursor. Ignore stale events for the active revision, retain them in history, and show old results as stale until the backend publishes a validated new result. Custom application events use AG-UI custom envelopes.
 - [ ] Render named work stages: Documents, Policy, Evidence, Calculation, Control Review, Officer Review.
+- [ ] Build a right-side activity rail that renders agent role, node name, tool label, running/success/failure state, latency and safe input/output summaries.
+- [ ] Group tool calls under their workflow node and let users expand citations or generated artifacts without showing raw prompts or chain-of-thought.
+- [ ] Update the central workbench from `EVIDENCE_FOUND`, `DEFINITION_RESOLVED`, `CALCULATION_COMPLETED`, `REVIEW_REQUIRED`, `RESULT_INVALIDATED`, `APPROVAL_INVALIDATED` and `PACKAGE_REVISED` events.
+- [ ] Show concurrent legal and financial branches separately, then animate their join at evidence mapping. Derive progress only from completed required stages.
 - [ ] Support reconnect from last event sequence and distinguish retryable connection failure from case failure.
+- [ ] Test out-of-order, duplicated, missed and replayed events; a snapshot plus event cursor must reconstruct the same visible state.
 - [ ] Commit `feat: stream covenant case state`.
 
 ## Task 5: Build the definition-graph workbench

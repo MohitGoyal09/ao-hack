@@ -231,6 +231,10 @@ apps/api/src/covenant_certificate/
 - [ ] Persist an event before publishing it and enforce unique run sequence numbers.
 - [ ] Resume from the last acknowledged sequence after reconnect.
 - [ ] Publish domain events only, never hidden reasoning or raw document bodies.
+- [ ] Stream run, node and safe tool-call lifecycle with stable call IDs, agent role, tool name, status, timestamps, latency, redacted input/output summaries, evidence references and typed error class.
+- [ ] Use AG-UI tool-call events for model-requested tools and custom envelopes for deterministic workflow nodes. Persist completion before publishing it.
+- [ ] Emit `EVIDENCE_FOUND`, `DEFINITION_RESOLVED`, `CALCULATION_COMPLETED`, `REVIEW_REQUIRED`, `RESULT_INVALIDATED`, `APPROVAL_INVALIDATED` and `PACKAGE_REVISED` application events.
+- [ ] Add bounded event payloads and tests proving document bodies, hidden reasoning, provider payloads and secrets never enter the client stream.
 - [ ] Authenticate every command and rate-limit run creation.
 - [ ] Add revision creation, impact lookup, snapshot and revision-bound decision endpoints from `docs/implementation-contract.md`. Publish custom domain events inside AG-UI envelopes and retain decimal strings over JSON.
 - [ ] Commit `feat: expose covenant workflow api`.

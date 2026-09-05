@@ -2,6 +2,8 @@
 
 > Revision 2026-09-05: `docs/implementation-contract.md` controls implementation wherever this original design differs. It adds dataset readiness, update/recheck, immutable case revisions, stale-approval invalidation, durable jobs, scoped results and precise draft finalization. Read it first; the original sections below retain background detail.
 
+> Streaming clarification: the frontend receives persisted AG-UI lifecycle/tool events and bounded domain events described in `docs/implementation-contract.md`. Tool calls are visible through redacted summaries and evidence references; prompts, document bodies and hidden reasoning remain server-side.
+
 Date: 2026-09-04
 
 Status: proposed architecture, ready for approval before implementation
