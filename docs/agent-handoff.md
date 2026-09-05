@@ -1,7 +1,7 @@
 # Teammate handoff: Covenant Certificate
 
-Last verified: 2026-09-06 against commit `d0cc6c6` plus the uncommitted
-2026-09-06 build session described below. Counts go stale with every phase;
+Last verified: 2026-09-06 against commit `d0cc6c6` plus the 2026-09-06
+build session described below (committed locally in focused commits, not pushed). Counts go stale with every phase;
 re-run the baseline commands instead of trusting them.
 
 This is the main start file for a new engineer or coding agent. It replaces the
@@ -92,18 +92,18 @@ retain their license.
 
 ## Current verified status
 
-Fresh checks on 2026-09-06 (audit wave, at `d0cc6c6`):
+Fresh checks on 2026-09-06 (audit wave at `d0cc6c6`, refreshed by the integration passes after the build session):
 
 | Area | Status |
 |---|---|
-| Git | local `main` == `origin/main` at `d0cc6c6`; build-session work is uncommitted at the time of writing |
-| Backend tests | suite green offline (`tests/test__env.py` blanks the DB vars); the suite prints its own count (142 OK, 13 skipped on 2026-09-06) |
-| Frontend | `npm ci` and production build passed at `d0cc6c6`; workbench build passes (`/`, `/cases/[id]`, two API routes) |
+| Git | local `main` is ahead of `origin/main` by the 2026-09-06 build-session commits (`git log origin/main..main`); nothing pushed by agents |
+| Backend tests | suite green offline (`tests/test__env.py` blanks the DB vars); the suite prints its own count (159 OK, 13 skipped on 2026-09-06 after the second build wave) |
+| Frontend | `npm ci` and production build passed at `d0cc6c6`; production build passes (`/`, `/cases/[id]`, `/cases/[id]/workpaper`, two API routes) |
 | Dependency audit | `npm audit --omit=dev`: 18 findings, 0 critical, all transitive under `next`/`hono` |
 | Supabase project | `ao-hack`, `ap-south-1`, active and linked; hosted DB, bucket and Auth verified |
-| Hosted migrations | 5 of 5 tracked migrations applied at audit; 6th (`20260906013139_langgraph_checkpoints`) applied 2026-09-06; `/health/ready` 200, all components `postgres` |
-| Hosted E2E | upload -> job -> worker -> snapshot -> review -> officer approval proven on hosted infra by the audit (checkpoint gate bypassed via a wrapper) |
-| Production readiness | not ready: no durable interrupt/resume, no event replay, no live model proof, no holdout eval |
+| Hosted migrations | 7 of 7 tracked migrations applied (`20260906013139_langgraph_checkpoints` and `20260906022716_case_template` added 2026-09-06); `/health/ready` 200, all components `postgres` |
+| Hosted E2E | upload -> job -> worker -> snapshot -> review -> officer approval proven on hosted infra with the real app and the real worker (integration pass); `scripts/hosted_smoke.py` re-checks login, readiness, snapshot and the reviewer 403 read-only; `GET /api/cases` and `GET /api/cases/{id}/events` verified on Postgres 2026-09-06 |
+| Production readiness | not ready: no durable interrupt/resume, no event replay (the feed polls a cursor), no holdout eval; the live-model proof is a tool-calling run only |
 
 Run the baseline again instead of trusting these counts:
 
@@ -206,12 +206,13 @@ These are helper tools, not the complete production agent workflow of Phase 5.
 - Ten reviewed `data/gold/` labels contain source spans and reviewer metadata.
 - Gold labels test extraction only. They do not claim a compliance verdict.
 
-## 2026-09-06 build session (uncommitted while this was written)
+## 2026-09-06 build session (committed locally in focused commits; not pushed)
 
-Four agents worked in parallel after an audit wave (requirements/docs truth,
-hosted backend, frontend). Everything in this list was verified by the
-integration pass on 2026-09-06 (suite 142 OK / 13 skipped, web build green,
-offline and hosted stories run through the UI proxy).
+Two waves of agents worked in parallel after an audit wave (requirements/docs
+truth, hosted backend, frontend). Everything in this list was verified by the
+integration passes on 2026-09-06 (suite 159 OK / 13 skipped after the second
+wave, web build green, offline and hosted stories run through the UI proxy,
+hosted smoke plus the events and case-list routes re-checked on Postgres).
 
 - **Agent A — durability/worker.** Tracked migration
   `20260906013139_langgraph_checkpoints.sql` (LangGraph `PostgresSaver`
@@ -241,9 +242,38 @@ offline and hosted stories run through the UI proxy).
 - **Agent D — docs.** README rewrite, this section, `docs/session-state.md`,
   status-report script/doc, `data/` truth fixes, env examples (NIM option,
   `INPROCESS_WORKER`), root `CLAUDE.md`, `docs/demo-script.md`.
+- **Agent E — live model.** NVIDIA NIM `nvidia/nemotron-3-super-120b-a12b`
+  through `langchain-openai`; a real tool-calling run (list -> run -> reply
+  with the calculator's 3.14x) observed directly and over `/ag-ui`.
+- **Agent G — event feed.** `GET /api/cases/{id}/events?after_sequence=N&limit=200`
+  (member auth, 404 for other orgs, oldest-first, id-only payloads,
+  `created_at`) over the durable `domain_events`; workbench `EventFeed`
+  cursor-polls every 2 s while a job runs.
+- **Agent F — printable workpaper.** `/cases/[id]/workpaper`: the snapshot
+  as a document (hashes, cited rule, exact facts, calculation with the
+  period note, coverage, issues, approvals with SUPERSEDED stamps, documents,
+  required statements, audit trace), DRAFT banner + watermark on every
+  printed page, `window.print()`; no backend change, no pass/fail words.
+- **Agent H — evaluation harness.** `apps/api/scripts/eval.py` (deterministic,
+  offline, byte-stable JSON, exit 1 on golden mismatch or false pass) and
+  `docs/evaluation.md` with denominators; `tests/test_eval_harness.py`.
+- **Agent L — hosted setup.** Tracked, secret-free `scripts/seed_demo_identity.py`
+  (idempotent officer/reviewer + org + memberships, `--check`) and
+  `scripts/hosted_smoke.py`; `docs/hosted-setup.md`; `DEMO_*` env keys.
+- **Agent M — case creation.** `POST /api/cases` (reviewer+, from a curated
+  template, fresh `slug-xxxx` id at `rev-1`) and `GET /api/cases`
+  (member-scoped list); created ids resolve everywhere through one
+  `InMemoryRepository.get_case` resolver; migration
+  `20260906022716_case_template.sql`; landing "Start a new case" panel.
+- **Integration.** Officer-approval body contract fix (UI echoes
+  `artifacts.calculation`), revision heads ordered numerically /
+  by `created_at` (string `max()` broke at `rev-10`), docs truth, focused
+  local commits after each wave.
 
-Phases 5 (durable interrupt/resume, live model proof), 6 (event outbox and
-replay), 8 (holdout eval) and 9 (export, ops) remain open.
+Phases 5 (durable interrupt/resume), 6 (event outbox and replay — the events
+route reads the durable log, replay is not built), 8 (holdout set; the
+harness in `docs/evaluation.md` measures the curated set only) and 9 (signed
+export, ops) remain open.
 
 ## Main gaps and bugs
 
@@ -257,14 +287,14 @@ replay), 8 (holdout eval) and 9 (export, ops) remain open.
 | P0 | ~~No upload API or immutable intake transaction~~ done `b2086ed` | `POST /documents`, `GET /documents/{id}`, agent tool takes `document_id` |
 | P0 | ~~Extracted data is not authoritative revision state~~ done `d0cc6c6` + 2026-09-06 session | pipeline persists rules/facts/artifacts per revision; snapshot exposes them and `/run` honours the head revision (verified offline and hosted 2026-09-06) |
 | P1 | No durable event outbox and replay | reconnect cannot restore exact progress |
-| P1 | AG-UI route exists but custom domain events do not | UI cannot show real node/tool/review progress |
+| P1 | ~~Custom domain events invisible to the UI~~ `GET /api/cases/{id}/events` + workbench feed 2026-09-06 | polling cursor over the durable log, not a push/replay stream |
 | P1 | No durable LangGraph interrupt/resume review | human review is REST state, not a paused agent execution |
 | P1 | Parser supports one Aon pattern | arbitrary agreements and amendment chains do not work |
-| P1 | No real Gemini/LiteLLM proof | tool calls, structured output, retries, cost data unverified |
+| P1 | ~~No real live-model proof~~ NVIDIA NIM tool-calling run observed 2026-09-06 (README "Model provider") | structured output, retries and cost data still unverified |
 | P1 | ~~Schema is hosted but backend repositories are not wired to it~~ proven 2026-09-06 audit | upload -> worker -> approval ran on hosted Postgres/Storage/Auth; restart recovery still only covered by the opt-in integration test |
 | P1 | Frontend misses intake, revisions, review inbox, approval — `/cases/[id]` workbench landed 2026-09-06 | event replay still missing (polling only) |
-| P2 | No untouched agreement family or final calculation labels | product accuracy is not measured |
-| P2 | No PDF workpaper export | certificate is a JSON draft object |
+| P2 | No untouched agreement family or final calculation labels | only the curated set is measured (`docs/evaluation.md`); accuracy on unseen agreements is not |
+| P2 | ~~No PDF workpaper export~~ printable DRAFT workpaper `/cases/[id]/workpaper` 2026-09-06 | browser print to PDF; no server-side PDF, no signature |
 | P2 | npm audit has 18 findings (`--omit=dev`), 0 critical, all transitive | must be triaged before a security claim |
 
 ## Target production flow
@@ -567,6 +597,13 @@ GET  /api/packages/{package_id}
 GET  /api/packages/{package_id}/download
 POST /ag-ui
 ```
+
+Done as of 2026-09-06: `POST /api/cases` (plus `GET /api/cases`),
+`POST /documents`, `GET /documents/{id}`, `POST /revisions`, `GET /snapshot`,
+`GET /events?after_sequence=N`, `POST /resolve`, `POST /officer-approval`,
+`POST /ag-ui`. Runs are exposed as `GET /cases/{id}/jobs` + `POST /jobs/{id}/cancel`
+instead of `/runs`; the `/packages` routes are not built (the JSON package is
+downloaded from the snapshot; the printable workpaper is a browser page).
 
 Private reads and mutations need organization membership. Review needs reviewer
 authority. Approval needs officer authority. Identity always comes from server.

@@ -85,7 +85,10 @@ upload -> job -> worker -> snapshot -> review -> officer-approval path ran on
 the hosted project. A sixth migration (`20260906013139_langgraph_checkpoints`)
 adds the LangGraph checkpoint tables that readiness requires; it was applied to
 the hosted project on 2026-09-06 (`supabase migration list --linked` 6/6,
-`GET /health/ready` 200 with checkpoint mode `postgres`).
+`GET /health/ready` 200 with checkpoint mode `postgres`). A seventh
+(`20260906022716_case_template`, adds `covenant_cases.template_case_id` for
+cases created from templates) was applied the same day; tracked and applied
+counts are 7/7.
 
 On 2026-09-05:
 

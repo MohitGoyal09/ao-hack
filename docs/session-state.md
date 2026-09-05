@@ -44,7 +44,8 @@ Repo: https://github.com/MohitGoyal09/ao-hack.git
    or `needs_ocr`. No OCR.
 5. No holdout agreement family; false-pass count is on the curated set only
    (Phase 8).
-6. Export is a JSON draft package; no marked PDF workpaper (Phase 9).
+6. Export is a JSON draft package plus a printable DRAFT workpaper
+   (`/cases/[id]/workpaper`, browser print); no server-side PDF or signature (Phase 9).
 7. Neatlogs wired but never exercised with a key.
 8. npm audit: 18 transitive findings (0 critical) untriaged.
 9. No case-creation API; demo cases are seeded per organization on first
