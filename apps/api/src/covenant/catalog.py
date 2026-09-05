@@ -1,8 +1,15 @@
 """Curated, auditable cases used by the local hackathon demonstration.
 
-The numbers and agreement names are synthetic so the UI cannot accidentally imply
-that a public borrower has received a legal conclusion.  The shapes mirror the
-primary-source covenant patterns documented in ``docs/``.
+The Aurora, Beacon, and Meridian numbers and agreement names are synthetic so
+the UI cannot accidentally imply that a public borrower has received a legal
+conclusion.  The shapes mirror the primary-source covenant patterns documented
+in ``docs/``.
+
+One case (``aon-term-loan-leverage``) is compiled from real SEC-filed source
+documents by :mod:`.ingestion` and flows through the identical calculator,
+policy, and audit path.  Its narrative and risk note state the financial-period
+and definition proxies so a demo result cannot be mistaken for a certification
+verdict.
 """
 
 from __future__ import annotations
@@ -12,6 +19,7 @@ from typing import Literal
 
 from .domain import Citation, CovenantCase, CovenantRule, DocumentVersion, FinancialFact
 from .hashing import stable_hash
+from .ingestion import AON_CASE_ID, build_aon_term_loan_case
 
 
 PERIOD = "Trailing twelve months ended 2026-06-30"
@@ -341,4 +349,6 @@ def build_demo_catalog() -> dict[str, CovenantCase]:
             ),
         ),
     ]
-    return {case.id: case for case in cases}
+    catalog = {case.id: case for case in cases}
+    catalog[AON_CASE_ID] = build_aon_term_loan_case()
+    return catalog
