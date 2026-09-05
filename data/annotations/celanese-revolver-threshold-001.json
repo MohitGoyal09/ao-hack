@@ -1,0 +1,24 @@
+{
+  "label_id": "celanese-revolver-threshold-001",
+  "status": "PROPOSED",
+  "package_id": "celanese-revolver",
+  "review_scope": "extraction-only",
+  "claim": "The February 2024 second amendment (revolving facility) sets a Financial Covenant schedule from 5.75:1.00 (Mar/Jun 2023) stepping down to 3.50:1.00 (Jun 2026 and after), with a conditional Qualifying-Acquisition uplift to 4.25:1.00.",
+  "source_spans": [
+    {
+      "source_path": "raw/sec/celanese/2024-second-amendment-revolving.html",
+      "anchor_text": "Permit the Consolidated Leverage Ratio on the last day of any fiscal quarter of Holdings (each such date, a \u201c Test Date \u201d) to be greater than the ratio set forth below for such fiscal quarter (the \u201c Financial Covenant \u201d): Fiscal Quarter Ended Consolidated Leverage Ratio March 31, 2023 5.75:1.00 June 30, 2023 5.75:1.00 September 30, 2023 5.50:1.00 December 31, 2023 5.25:1.00 March 31, 2024 5.00:1.00 June 30, 2024 5.00:1.00 September 30, 2024 5.00:1.00 December 31, 2024 4.75:1.00 March 31, 2025 4.50:1.00 June 30, 2025 4.25:1.00 September 30, 2025 4.25:1.00 December 31, 2025 4.00:1.00 March 31, 2026 4.00:1.00 June 30, 2026 and each fiscal quarter ended thereafter 3.50:1.00",
+      "note": "Full threshold table"
+    },
+    {
+      "source_path": "raw/sec/celanese/2024-second-amendment-revolving.html",
+      "anchor_text": "Second Amendment",
+      "note": "Facility identity: revolving-facility amendment 2"
+    }
+  ],
+  "rationale": "Proposes the revolving threshold table text. Belongs to the revolving chain only; never chain with the term-loan amendment.",
+  "proposed_by": "ao-hack-16 worker",
+  "proposed_at": "2026-09-05",
+  "needs_reviewer": true,
+  "not_a_verdict": true
+}

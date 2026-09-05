@@ -1,0 +1,27 @@
+{
+  "label_id": "aon-2024-lev-threshold-001",
+  "status": "REVIEWED",
+  "package_id": "aon-2024",
+  "review_scope": "extraction-only",
+  "claim": "Aon 2024 term-loan agreement states a Consolidated Leverage Ratio step-down: 4.00:1.00 (first + first two full quarters after Closing), 3.75:1.00 (third-fourth-fifth), 3.25:1.00 (sixth and after), subject to a Covenant Reset Notice provision.",
+  "source_spans": [
+    {
+      "source_path": "raw/sec/aon/2024-term-loan-credit-agreement.html",
+      "anchor_text": "The Parent will maintain as of the last day of the Measurement Period ending on (i) the last day of the first Fiscal Quarter ending after the Closing Date and the last day of each of the first and second consecutive full Fiscal Quarters ending after the Closing Date, a Consolidated Leverage Ratio of not more than 4.00:1.00, (ii) the last day of each of the third, fourth and fifth consecutive full Fiscal Quarters ending after the Closing Date, a Consolidated Leverage Ratio of not more than 3.75:1.00 and (iii) the last day of the sixth consecutive full Fiscal Quarter ending after the Closing Date and the last day of each Fiscal Quarter ending thereafter, a Consolidated Leverage Ratio of not more than 3.25:1.00",
+      "note": "Threshold schedule; Covenant Reset Notice text follows immediately after"
+    }
+  ],
+  "rationale": "Proposes the leverage threshold schedule as extracted text only. No claim about which test date applies, no compliance verdict.",
+  "proposed_by": "ao-hack-16 worker",
+  "proposed_at": "2026-09-05",
+  "needs_reviewer": true,
+  "not_a_verdict": true,
+  "review": {
+    "reviewer": "ao-hack-16 worker",
+    "review_date": "2026-09-05",
+    "review_scope": "extraction-only",
+    "rationale": "Proposes the leverage threshold schedule as extracted text only. No claim about which test date applies, no compliance verdict.",
+    "method": "Verified each anchor_text substring is present verbatim in the cited data/raw/ file; checked claim stays within extraction-only scope (no verdict, no test-date applicability).",
+    "verdict_claimed": false
+  }
+}
