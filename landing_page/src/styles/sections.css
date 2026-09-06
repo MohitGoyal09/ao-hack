@@ -3,7 +3,9 @@
   border-block: 1px solid var(--rule-soft);
   background: var(--paper-deep);
   overflow: hidden;
-  padding: 1.05rem 0;
+  padding: 0.95rem 0;
+  margin-block: 0.5rem 1.25rem;
+  width: 100%;
 }
 
 .marquee-track {
@@ -24,8 +26,8 @@
   white-space: nowrap;
   font-family: var(--font-mono);
   font-weight: 400;
-  font-size: 0.8rem;
-  letter-spacing: 0.28em;
+  font-size: 0.82rem;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--ink-soft);
 }
@@ -33,7 +35,7 @@
 .marquee-star {
   font-style: normal;
   color: var(--green-mid);
-  font-size: 0.7rem;
+  font-size: 0.75rem;
 }
 
 @keyframes marquee {
@@ -43,8 +45,9 @@
 /* —— engine cards —— */
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
   gap: var(--sp-4);
+  width: 100%;
 }
 
 .card {
@@ -52,13 +55,14 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  padding: var(--sp-5);
+  padding: 1.75rem;
   background: var(--paper-raised);
-  border: 1px solid var(--rule-soft);
+  border: 1px solid rgba(20, 111, 105, 0.3);
   border-radius: 8px;
   overflow: hidden;
-  transition: transform var(--settle) var(--ease), border-color var(--settle) var(--ease),
-    box-shadow var(--settle) var(--ease);
+  transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 0.24s cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .card::before {
@@ -67,14 +71,14 @@
   inset: 0 0 auto 0;
   height: 2px;
   background: linear-gradient(90deg, var(--green), var(--green-mid));
-  opacity: 0;
-  transition: opacity var(--settle) var(--ease);
+  opacity: 0.6;
+  transition: opacity 0.24s var(--ease);
 }
 
 .card:hover {
-  transform: translateY(-6px);
-  border-color: rgba(20, 111, 105, 0.4);
-  box-shadow: 0 24px 60px rgba(24, 60, 54, 0.08);
+  transform: translate(-5px, -5px);
+  border-color: var(--green);
+  box-shadow: 6px 6px 0px rgba(20, 111, 105, 0.25), 0 20px 40px rgba(20, 111, 105, 0.12);
 }
 
 .card:hover::before {
@@ -92,116 +96,526 @@
 .card-title {
   font-family: var(--font-display);
   font-weight: 300;
-  font-size: 1.6rem;
+  font-size: 1.55rem;
   line-height: 1.15;
   color: var(--ink);
 }
 
 .card-body {
   color: var(--ink-soft);
-  font-size: 0.95rem;
+  font-size: 0.96rem;
+  line-height: 1.65;
   flex: 1;
 }
 
 .card-chip {
   align-self: flex-start;
-  margin-top: var(--sp-2);
-  padding: 0.4rem 0.7rem;
-  border: 1px solid var(--rule-soft);
-  border-radius: 4px;
-  background: var(--paper);
-  font-family: var(--font-mono);
-  font-size: var(--mono-size);
-  letter-spacing: 0.06em;
-  color: var(--ink-soft);
-}
-
-/* —— workflow timeline —— */
-.workflow-panel {
-  background: var(--paper-raised);
-  border: 1px solid var(--rule-soft);
-  border-radius: 10px;
-  padding: var(--sp-5) var(--sp-5) 0;
-  margin-top: var(--sp-4);
-}
-
-.timeline {
-  position: relative;
-  padding-bottom: var(--sp-1);
-}
-
-.timeline::before {
-  content: '';
-  position: absolute;
-  left: 8px;
-  top: 14px;
-  bottom: 14px;
-  width: 1.5px;
-  background: linear-gradient(var(--green), var(--green-pale));
-  opacity: 0.45;
-}
-
-.step {
-  position: relative;
-  display: grid;
-  grid-template-columns: 1.6fr 1fr;
-  gap: var(--sp-4);
-  padding: 0 0 var(--sp-5) calc(2.6rem);
-}
-
-.step-dot {
-  position: absolute;
-  left: 0;
-  top: 0.35rem;
-  width: 17px;
-  height: 17px;
-  border-radius: 50%;
-  background: var(--paper-raised);
-  border: 1.5px solid var(--green);
-}
-
-.step-dot::after {
-  content: '';
-  position: absolute;
-  inset: 3px;
-  border-radius: 50%;
-  background: var(--green-mid);
-}
-
-.step-id {
-  font-family: var(--font-mono);
-  font-weight: 500;
-  font-size: var(--mono-size);
-  letter-spacing: var(--mono-track);
-  color: var(--green);
-}
-
-.step-name {
-  font-family: var(--font-display);
-  font-weight: 300;
-  font-size: 1.35rem;
-  line-height: 1.2;
-  color: var(--ink);
-  margin: 0.3rem 0 0.35rem;
-}
-
-.step-body {
-  color: var(--ink-soft);
-  font-size: 0.95rem;
-  max-width: 46ch;
-}
-
-.step-out {
-  align-self: start;
-  justify-self: end;
-  margin-top: 0.4rem;
-  padding: 0.55rem 0.85rem;
-  border: 1px solid var(--rule-soft);
+  margin-top: 0.6rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid rgba(20, 111, 105, 0.2);
   border-radius: 4px;
   background: var(--paper);
   font-family: var(--font-mono);
   font-size: var(--mono-size);
   letter-spacing: 0.05em;
+  color: var(--green-dark);
+}
+
+/* —— workflow command center & pipeline —— */
+.workflow-metrics-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  background: var(--paper-raised);
+  border: 1px solid rgba(20, 111, 105, 0.28);
+  border-radius: 8px;
+  padding: 1.1rem 1.8rem;
+  margin: 1.5rem 0 2rem;
+  box-shadow: 2px 2px 0px rgba(20, 111, 105, 0.1);
+}
+
+.wf-metric-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  text-align: center;
+}
+
+.wf-metric-num {
+  font-family: var(--font-mono);
+  font-size: 1.35rem;
+  font-weight: 700;
   color: var(--green);
+  letter-spacing: -0.02em;
+}
+
+.wf-metric-label {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.wf-metric-divider {
+  width: 1px;
+  height: 32px;
+  background: var(--rule-soft);
+}
+
+.workflow-grid {
+  display: grid;
+  grid-template-columns: 1.18fr 0.92fr;
+  gap: 2rem;
+  align-items: start;
+  width: 100%;
+}
+
+.workflow-stages-col {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.workflow-track-line {
+  position: absolute;
+  left: 28px;
+  top: 30px;
+  bottom: 40px;
+  width: 2px;
+  background: linear-gradient(180deg, var(--green) 0%, rgba(20, 111, 105, 0.15) 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.wf-stage-card {
+  position: relative;
+  z-index: 1;
+  background: var(--paper-raised);
+  border: 1px solid rgba(20, 111, 105, 0.25);
+  border-radius: 8px;
+  padding: 1.4rem 1.6rem;
+  cursor: pointer;
+  outline: none;
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+              box-shadow 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+              border-color 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+              background 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  text-align: left;
+}
+
+.wf-stage-card:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: 4px 4px 0px rgba(20, 111, 105, 0.22);
+  border-color: rgba(20, 111, 105, 0.5);
+  background: #ffffff;
+}
+
+.wf-stage-card.is-active {
+  background: #ffffff;
+  border-color: var(--green);
+  transform: translate(-4px, -4px);
+  box-shadow: 6px 6px 0px rgba(20, 111, 105, 0.35);
+}
+
+.wf-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.wf-stage-badge-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.wf-stage-pill {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.82rem;
+  background: var(--green);
+  color: #ffffff;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+
+.wf-stage-subpill {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  color: var(--green-dark);
+  background: rgba(20, 111, 105, 0.09);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+.wf-sla-tag {
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  background: var(--paper);
+  border: 1px solid var(--rule-soft);
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+}
+
+.wf-stage-title {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 400;
+  line-height: 1.25;
+  color: var(--ink);
+  margin: 0.35rem 0 0.15rem;
+}
+
+.wf-stage-tagline {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--green-dark);
+  margin-bottom: 0.6rem;
+}
+
+.wf-stage-desc {
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  margin-bottom: 0.85rem;
+}
+
+.wf-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+
+.wf-tag-pill {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  background: var(--paper);
+  border: 1px solid var(--rule-soft);
+  padding: 0.2rem 0.55rem;
+  border-radius: 3px;
+  letter-spacing: 0.03em;
+}
+
+.wf-io-strip {
+  background: var(--paper);
+  border: 1px solid var(--rule-soft);
+  border-radius: 6px;
+  padding: 0.6rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.8rem;
+}
+
+.wf-io-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.wf-io-lbl {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--green);
+  min-width: 30px;
+}
+
+.wf-io-val {
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.wf-io-val-out {
+  color: var(--green-dark);
+  font-weight: 600;
+}
+
+.wf-card-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--rule-soft);
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+}
+
+.wf-status-bullet {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--rule-soft);
+  transition: all 0.2s ease;
+}
+
+.wf-stage-card.is-active .wf-status-bullet {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(20, 111, 105, 0.7);
+}
+
+.wf-status-text {
+  flex: 1;
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+  color: var(--ink-muted);
+  transition: color 0.2s ease;
+}
+
+.wf-stage-card.is-active .wf-status-text {
+  color: var(--green-dark);
+  font-weight: 600;
+}
+
+.wf-arrow-hint {
+  font-size: 0.78rem;
+  color: var(--green);
+  font-weight: 700;
+}
+
+/* —— Live Pipeline Telemetry Inspector (Right Column) —— */
+.workflow-inspector-col {
+  position: sticky;
+  top: 90px;
+}
+
+.wf-inspector-card {
+  background: #0f1211;
+  border: 1px solid rgba(20, 111, 105, 0.45);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(20, 111, 105, 0.2);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.wf-insp-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.1rem;
+  background: #080a09;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 0.75rem;
+}
+
+.wf-insp-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.wf-insp-dots .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.dot-red { background: #ff5f56; }
+.dot-amber { background: #ffbd2e; }
+.dot-green { background: #27c93f; }
+
+.wf-insp-title {
+  font-size: 0.76rem;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 0.05em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-insp-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  color: #4ade80;
+  background: rgba(34, 197, 94, 0.12);
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid rgba(74, 222, 128, 0.25);
+  white-space: nowrap;
+}
+
+.wf-insp-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.8);
+}
+
+.wf-insp-meta-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.wf-meta-cell {
+  background: #0d100f;
+  padding: 0.6rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.wf-meta-k {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.42);
+  letter-spacing: 0.05em;
+}
+
+.wf-meta-v {
+  font-size: 0.8rem;
+  color: #5eead4;
+  font-weight: 500;
+}
+
+.wf-insp-code-body {
+  padding: 1.1rem;
+  background: #090c0b;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+}
+
+.wf-code-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 0.6rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.wf-code-lang {
+  color: #e8a838;
+  text-transform: uppercase;
+}
+
+.wf-code-block {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: #d1d5db;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 2;
+  overflow-x: auto;
+}
+
+.wf-insp-io-box {
+  background: #0d100f;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.85rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.wf-insp-io-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.wf-insp-io-title {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.wf-insp-io-content {
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+
+.wf-insp-io-item-out .wf-insp-io-content {
+  color: #34d399;
+  font-weight: 500;
+}
+
+.wf-insp-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.1rem;
+  background: #080a09;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 0.5rem;
+}
+
+.wf-nav-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.75rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.wf-nav-btn:hover:not(:disabled) {
+  border-color: #34d399;
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.08);
+}
+
+.wf-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.wf-stage-dots-nav {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.wf-dot-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.72rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wf-dot-btn:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+}
+
+.wf-dot-btn.is-active {
+  background: var(--green);
+  border-color: var(--green);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+/* Legacy fallback support */
+.workflow-panel {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-soft);
+  border-radius: 10px;
+  padding: 2rem 2.25rem 0.75rem;
+  margin-top: 0.5rem;
+  width: 100%;
 }

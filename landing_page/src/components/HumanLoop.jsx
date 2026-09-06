@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 const guarantees = [
   {
     title: 'Fail-closed routing',
-    body: 'Ambiguous or missing evidence always reaches a human reviewer — never a guess.',
+    body: 'Ambiguous or missing evidence always reaches a human reviewer, never a guess.',
   },
   {
     title: 'Exact officer approval',
@@ -19,7 +19,7 @@ const guarantees = [
   },
   {
     title: 'Readiness truth',
-    body: '/health/live and /health/ready expose real database state — no silent in-memory fallback.',
+    body: '/health/live and /health/ready expose real database state with no silent in-memory fallback.',
   },
   {
     title: 'Durable queue',
@@ -39,7 +39,7 @@ export default function HumanLoop() {
           </h2>
           <p className="section-sub">
             Rux accelerates the trivial and escalates the consequential. The
-            system decides only when the evidence is exact — everything else is
+            system decides only when the evidence is exact: everything else is
             routed, documented, and handed to a reviewer.
           </p>
           <pre className="human-code">

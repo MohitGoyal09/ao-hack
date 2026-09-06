@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.6.0",
   "type": "module",
-  "description": "Rux — the autonomous covenant engine. 3D animated landing page.",
+  "description": "Rux · the autonomous covenant engine. 3D animated landing page.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

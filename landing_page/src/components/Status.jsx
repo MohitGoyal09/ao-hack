@@ -6,7 +6,7 @@ const shipped = [
   'Human review & exact officer approval flows',
   'Supabase schema, Auth/Storage adapters & Postgres job queue',
   'Next.js + CopilotKit + AG-UI frontend dashboard',
-  'Fail-safe readiness — no silent in-memory fallback',
+  'Fail-safe readiness with no silent in-memory fallback',
   '46 backend tests passing · frontend production build green',
 ]
 
@@ -29,8 +29,8 @@ export default function Status() {
           Where Rux stands <span className="em">today.</span>
         </h2>
         <p className="section-sub">
-          Core engine shipped and verified. The production workflow — live
-          persistence, workers, and durable replay — is the next frontier.
+          Core engine shipped and verified. The production workflow (live
+          persistence, workers, and durable replay) is the next frontier.
         </p>
       </div>
 

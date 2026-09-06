@@ -10,13 +10,13 @@ const cards = [
   {
     tag: 'Evidence',
     title: 'Evidence that fails closed',
-    body: 'When a number is missing or unclear, Rux never guesses. The signal routes straight to human review — ambiguity becomes visibility, not risk.',
+    body: 'When a number is missing or unclear, Rux never guesses. The signal routes straight to human review: ambiguity becomes visibility, not risk.',
     chip: 'status: review → assigned to human',
   },
   {
     tag: 'Approval',
     title: 'Revisions & bound approvals',
-    body: 'Amendments and threshold changes become revisable revisions. An officer approval binds to the revision, package hash, ratio and inputs — exact, immutable, auditable.',
+    body: 'Amendments and threshold changes become revisable revisions. An officer approval binds to the revision, package hash, ratio and inputs: exact, immutable, auditable.',
     chip: 'approval → bound to hash: c3f7…a9',
   },
 ]
