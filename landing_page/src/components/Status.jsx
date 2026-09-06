@@ -88,29 +88,6 @@ export default function Status() {
           </ul>
         </motion.div>
       </div>
-
-      <motion.div
-        className="progress-wrap"
-        initial={{ opacity: 0, y: 26 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, margin: '-80px' }}
-        transition={{ duration: 0.6, ease: [0.2, 0.8, 0.2, 1] }}
-      >
-        <div className="progress-head">
-          <span className="progress-title">
-            ≈ 50% shipped — core engine live
-          </span>
-          <span className="progress-note mono">v0.6 · pushed to GitHub main</span>
-        </div>
-        <div className="progress" role="progressbar" aria-valuenow={50} aria-valuemin={0} aria-valuemax={100}>
-          <div className="progress-fill" />
-        </div>
-        <p className="progress-caption">
-          <strong>Done:</strong> covenant engine · evidence checks · revisions ·
-          approvals · Supabase foundation · dashboard. <strong>Next:</strong> live
-          end-to-end production workflow.
-        </p>
-      </motion.div>
     </section>
   )
 }

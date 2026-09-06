@@ -73,6 +73,7 @@ try {
       hasWorkflowSteps: document.querySelectorAll('.step').length,
       hasGuarantees: document.querySelectorAll('.guarantee').length,
       hasStatus: !!document.querySelector('.status-card'),
+      hasProgressWrap: !!document.querySelector('.progress-wrap'),
       hasFooter: !!document.querySelector('.footer'),
       webglFallback: !!document.querySelector('.webgl-fallback'),
       fallbackCount: document.querySelectorAll('.webgl-fallback').length,

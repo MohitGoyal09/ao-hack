@@ -116,63 +116,6 @@
   margin-top: 0.2rem;
 }
 
-.progress-wrap {
-  margin-top: var(--sp-6);
-  padding: var(--sp-5);
-  border: 1px solid var(--rule-soft);
-  border-radius: 8px;
-  background: var(--ink);
-  color: var(--paper-raised);
-}
-
-.progress-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
-  margin-bottom: var(--sp-3);
-}
-
-.progress-title {
-  font-family: var(--font-mono);
-  font-size: var(--mono-size);
-  letter-spacing: var(--mono-track);
-  text-transform: uppercase;
-  color: var(--green-pale);
-}
-
-.progress-note {
-  font-family: var(--font-mono);
-  font-size: var(--mono-size);
-  letter-spacing: 0.08em;
-  color: var(--ink-faint);
-}
-
-.progress {
-  height: 10px;
-  border-radius: 999px;
-  background: rgba(247, 245, 236, 0.14);
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  width: 50%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--green-mid), var(--green-pale));
-}
-
-.progress-caption {
-  margin-top: var(--sp-3);
-  font-size: 0.9rem;
-  color: rgba(247, 245, 236, 0.78);
-}
-
-.progress-caption strong {
-  color: var(--paper-raised);
-}
-
 /* —— WebGL fallback orb —— */
 .webgl-fallback {
   position: absolute;
