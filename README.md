@@ -1,6 +1,6 @@
 <div align="center">
   <img src="landing_page/public/logo.png" alt="Covenant Certificate Logo" width="220" />
-  <h1>Covenant Certificate</h1>
+  <h1>Rux : Covenant Certificate</h1>
   <p><strong>Evidence-first loan covenant compliance workflow for borrower-side treasury teams</strong></p>
   <p><em>Track 2 — Autonomous Office of the CFO · Syndicate by Maximor</em></p>
   <p>
