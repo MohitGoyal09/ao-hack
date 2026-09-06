@@ -65,7 +65,9 @@ class CreateCaseTests(unittest.TestCase):
         self.assertEqual(snap.json()["revision"]["revision_id"], "rev-1")
         self.assertEqual(snap.json()["revision"]["rule_id"], "aon-max-consolidated-leverage")
         self.assertEqual(snap.json()["revision"]["threshold"], "4.00")
-        self.assertEqual(snap.json()["run_state"], "waiting_review")
+        self.assertEqual(snap.json()["run_state"], "pending")
+        self.assertEqual(snap.json()["open_review_issues"], 0)
+        self.assertEqual(snap.json()["documents"], [])
 
         # List: member-scoped, carries name / head run_state / template.
         listed = self.client.get("/api/cases", headers=OFFICER)
@@ -73,7 +75,7 @@ class CreateCaseTests(unittest.TestCase):
         mine = next(c for c in listed.json() if c["case_id"] == case_id)
         self.assertEqual(mine["name"], "Aon Q1 2024")
         self.assertEqual(mine["template_case_id"], TEMPLATE)
-        self.assertEqual(mine["run_state"], "waiting_review")
+        self.assertEqual(mine["run_state"], "pending")
         self.assertTrue(mine["created_at"])
         self.assertNotIn(case_id, [c["case_id"] for c in
                                    self.client.get("/api/cases", headers=OUTSIDER).json()])
@@ -94,7 +96,7 @@ class CreateCaseTests(unittest.TestCase):
         )
         self.assertEqual(upload.status_code, 200, upload.text)
         self.assertEqual(upload.json()["revision_id"], "rev-2")
-        self.assertTrue(upload.json()["job_id"])
+        self.assertIsNone(upload.json()["job_id"])
 
         # Tenant isolation and the curated catalog are untouched.
         self.assertEqual(self.client.get(f"/api/cases/{case_id}/snapshot",

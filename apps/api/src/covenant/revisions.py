@@ -106,6 +106,35 @@ ISSUE_SUMMARIES = {
     ),
 }
 
+#: Decisions that resolve an issue but invalidate dependent outputs: the
+#: affected calculation and package go stale and the revision must be
+#: recomputed before it can become ready for officer review.
+INVALIDATING_DECISIONS = frozenset({
+    "accept_evidence", "reject_evidence", "correct_mapping",
+})
+
+#: Decisions that keep the issue blocking: the run stays paused and the
+#: package can never become ready or approved on this decision alone.
+BLOCKING_DECISIONS = frozenset({
+    "request_document", "mark_unresolved",
+})
+
+
+def classify_decision_kind(decision_kind: str) -> str:
+    """Return "invalidating" or "blocking" for a review decision kind.
+
+    Raises ValueError for unknown kinds: an unrecognized decision must never
+    silently resolve or block.
+    """
+    if decision_kind in INVALIDATING_DECISIONS:
+        return "invalidating"
+    if decision_kind in BLOCKING_DECISIONS:
+        return "blocking"
+    raise ValueError(
+        f"unknown decision_kind {decision_kind!r}; expected one of "
+        f"{sorted(INVALIDATING_DECISIONS | BLOCKING_DECISIONS)}"
+    )
+
 
 def issue_view(issue_id: str, status: str, kind: str, decision_kind: str | None,
                rationale: str | None, resolved_by: str | None,
@@ -174,6 +203,7 @@ class RevisionStore:
         threshold: float,
         doc_ids: list[str],
         fact_keys: list[str],
+        seed_review_issue: bool = True,
     ) -> CaseRevision:
         with self._lock:
             existing = self._revisions.get(case_id, {})
@@ -208,14 +238,15 @@ class RevisionStore:
             self._events.setdefault(case_id, []).append(
                 {"sequence": 1, "name": "REVISION_CREATED", "revision_id": "rev-1"}
             )
-            # Seed one open blocking review issue for the resolve flow.
-            issue_id = f"{case_id}-evidence-1"
-            self._issues[issue_id] = ReviewIssueRecord(
-                issue_id=issue_id,
-                case_id=case_id,
-                revision_id="rev-1",
-                bundle_hash=bundle,
-            )
+            if seed_review_issue:
+                issue_id = f"{case_id}-evidence-1"
+                self._issues[issue_id] = ReviewIssueRecord(
+                    issue_id=issue_id,
+                    case_id=case_id,
+                    revision_id="rev-1",
+                    bundle_hash=bundle,
+                )
+            self._run_states[(case_id, "rev-1")] = "waiting_review" if seed_review_issue else "pending"
             return rev
 
     def current(self, case_id: str) -> CaseRevision:
@@ -241,6 +272,7 @@ class RevisionStore:
         documents: list[str],
         facts: list[str],
         new_threshold: float | None = None,
+        open_review_issue: bool = True,
     ) -> tuple[CaseRevision, ChangeSet, ImpactSet]:
         with self._lock:
             revs = self._revisions.get(case_id)
@@ -322,14 +354,16 @@ class RevisionStore:
             self._events[case_id].append(
                 {"sequence": seq + 1, "name": "RESULT_INVALIDATED", "revision_id": rev_id}
             )
-            # New revision opens a fresh review issue.
-            self._issues[f"{case_id}-{rev_id}-evidence-1"] = ReviewIssueRecord(
-                issue_id=f"{case_id}-{rev_id}-evidence-1",
-                case_id=case_id,
-                revision_id=rev_id,
-                bundle_hash=bundle,
-            )
+            if open_review_issue:
+                self.open_review_issue(case_id, rev_id, bundle)
             return new_rev, changeset, impact
+
+    def open_review_issue(self, case_id: str, revision_id: str, bundle_hash: str) -> None:
+        issue_id = f"{case_id}-{revision_id}-evidence-1"
+        self._issues.setdefault(issue_id, ReviewIssueRecord(
+            issue_id=issue_id, case_id=case_id,
+            revision_id=revision_id, bundle_hash=bundle_hash,
+        ))
 
     def impact(self, case_id: str, revision_id: str) -> ImpactSet:
         with self._lock:
@@ -374,29 +408,59 @@ class RevisionStore:
                 raise StaleCommandError("bundle hash no longer matches current state")
             if not rationale:
                 raise ValueError("rationale is required")
+            # Unknown decision kinds never silently resolve or block.
+            effect = classify_decision_kind(decision_kind)
+            case_id = issue.case_id
+            if effect == "blocking":
+                # request_document / mark_unresolved: the issue stays open
+                # and blocking. The run remains paused; readiness and
+                # approval stay impossible until a later invalidating
+                # decision and a fresh recomputation.
+                issue.decision_kind = decision_kind
+                issue.rationale = rationale
+                issue.evidence_refs = list(evidence_refs)
+                issue.resolved_by = actor
+                issue.resolved_at = _now()
+                response = {
+                    "issue_id": issue_id,
+                    "revision_id": revision_id,
+                    "status": "open",
+                    "blocking": True,
+                    "decision_kind": decision_kind,
+                }
+                self._idempotency[idempotency_key] = {
+                    "payload": payload, "response": response}
+                seq = len(self._events.get(case_id, [])) + 1
+                self._events.setdefault(case_id, []).append(
+                    {"sequence": seq, "name": "REVIEW_DECISION_RECORDED",
+                     "revision_id": revision_id}
+                )
+                return response
+            # Invalidating decisions resolve the issue but never mark the
+            # package ready: affected outputs go stale and the revision must
+            # be recomputed (run_state -> queued) before readiness.
             issue.status = "resolved"
             issue.decision_kind = decision_kind
             issue.rationale = rationale
             issue.evidence_refs = list(evidence_refs)
             issue.resolved_by = actor
             issue.resolved_at = _now()
-            still_open = any(
-                i.status == "open" for i in self._issues.values()
-                if i.case_id == issue.case_id and i.revision_id == revision_id
-            )
-            if not still_open:
-                self._snapshots[issue.case_id][revision_id].setdefault(
-                    "package_state", "ready_for_officer_review")
+            self._run_states[(case_id, revision_id)] = "queued"
             response = {
                 "issue_id": issue_id,
                 "revision_id": revision_id,
                 "status": "resolved",
                 "decision_kind": decision_kind,
+                "recalculation": "queued",
             }
             self._idempotency[idempotency_key] = {"payload": payload, "response": response}
-            seq = len(self._events.get(issue.case_id, [])) + 1
-            self._events.setdefault(issue.case_id, []).append(
+            seq = len(self._events.get(case_id, [])) + 1
+            self._events.setdefault(case_id, []).append(
                 {"sequence": seq, "name": "REVIEW_RESOLVED", "revision_id": revision_id}
+            )
+            self._events[case_id].append(
+                {"sequence": seq + 1, "name": "RESULT_INVALIDATED",
+                 "revision_id": revision_id}
             )
             return response
 
@@ -452,6 +516,8 @@ class RevisionStore:
         fresh_threshold: str | None = None,
         fresh_comparator: str | None = None,
         fresh_inputs: dict[str, str] | None = None,
+        *,
+        calculation_current: bool = False,
     ) -> ApprovalBinding:
         with self._lock:
             head = self.current(case_id)
@@ -477,6 +543,28 @@ class RevisionStore:
                 raise StaleCommandError("blocking review issues remain open")
             if not reason:
                 raise ValueError("reason is required")
+            if decision == "approved":
+                # The run must have completed a post-decision recomputation:
+                # a waiting (or never-run) run, a package that was never
+                # rechecked, or a stale/missing calculation can never approve.
+                run_state = self._run_states.get((case_id, revision_id))
+                if run_state != "completed":
+                    raise StaleCommandError(
+                        f"revision {revision_id} has no completed run "
+                        f"(run_state={run_state!r}); recalculation is required"
+                    )
+                package_state = self._snapshots[case_id][revision_id].get(
+                    "package_state", "draft")
+                if package_state != "ready_for_officer_review":
+                    raise StaleCommandError(
+                        f"revision {revision_id} is not ready for officer review "
+                        f"(package_state={package_state!r})"
+                    )
+                if not calculation_current:
+                    raise StaleCommandError(
+                        f"revision {revision_id} has no current calculation "
+                        "artifact; recalculation is required"
+                    )
             prior = [a for a in self._approvals.get(case_id, []) if not a.superseded]
             binding = ApprovalBinding(
                 actor=actor,
@@ -521,7 +609,7 @@ class RevisionStore:
                 "revision": head.model_dump(mode="json"),
                 # Stored states, never derived from issue counts: run_state is
                 # what the worker last wrote; package_state advances on resolve/approve.
-                "run_state": self._run_states.get((case_id, head.revision_id), "waiting_review"),
+                "run_state": self._run_states.get((case_id, head.revision_id), "pending"),
                 "per_covenant_results": [
                     {"rule_id": head.rule_id, "threshold": head.threshold, "status": "stale" if open_issues else "current"}
                 ],

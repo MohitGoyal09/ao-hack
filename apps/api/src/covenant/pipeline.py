@@ -96,6 +96,11 @@ class CasePipeline:
         self._artifacts: dict[tuple[str, str], list[dict]] = {}
         self._events: dict[tuple[str, str], list[dict]] = {}
         self._events_repo = revision_repository  # memory revision repo for RUN_* events
+        # Fixture-case provider for recalculation jobs on revisions without
+        # uploaded documents: ``case_provider(case_id) -> CovenantCase``.
+        # Wired by the API worker and the standalone worker entry point;
+        # absent means fixture recalculation is unavailable (fail-closed).
+        self.case_provider = None
         if dsn is None and hasattr(revision_repository, "bind_pipeline"):
             revision_repository.bind_pipeline(self)
 
@@ -134,9 +139,13 @@ class CasePipeline:
         Returns ``{"status", "revision_id", "artifacts", "calculation",
         "error"}``. The unsupported path is done-work, not failure: it
         returns ``status="waiting_review"`` with an evidence manifest and no
-        invented figures.
+        invented figures. Jobs carrying ``{"recalculation": True}`` re-run
+        the deterministic calculator for the same revision after a review
+        decision instead of extracting a new document.
         """
         payload = dict(job.payload or {})
+        if payload.get("recalculation"):
+            return self._run_recalculation(job, on_progress)
         document_id = payload.get("document_id")
         case_id = job.case_id
         revision_id = job.revision_id
@@ -149,6 +158,10 @@ class CasePipeline:
             raise PermanentRunError(f"unknown document {document_id}") from error
         except FileNotFoundError as error:
             raise TransientRunError(f"storage unavailable for {document_id}") from error
+        self._append_event(
+            case_id, org, revision_id, job.id, "DOCUMENT_READ",
+            {"job_id": job.id, "document_id": document_id},
+        )
         on_progress()
 
         # (2) extraction: the uploaded bytes first, then the case's latest
@@ -163,11 +176,15 @@ class CasePipeline:
         facts, fact_source = None, {"kind": "skipped",
                                     "reason": "no covenant rule extracted"}
         if rule is not None:
+            self._append_event(
+                case_id, org, revision_id, job.id, "AGREEMENT_RESOLVED",
+                {"job_id": job.id, "document_id": document_id},
+            )
             facts, fact_source = self._extract(
                 ingestion.extract_aon_financials, version, data, org, case_id,
                 "financial_statement",
-                ingestion.data_root() / "sec" / "aon" / "2023-form-10k.html",
-                "bundled fixture: Aon 2023 10-K",
+                None,
+                "",
             )
         on_progress()
         sources = {"rule": rule_source, "facts": fact_source}
@@ -306,6 +323,10 @@ class CasePipeline:
 
     def _resolve_org(self, job) -> str:
         payload = dict(job.payload or {})
+        if payload.get("recalculation") and payload.get("organization_id"):
+            # Recalculation jobs carry no document; the org travels in the
+            # payload set by the review-resolution route.
+            return str(payload["organization_id"])
         document_id = payload.get("document_id")
         if self._dsn is None:
             try:
@@ -379,6 +400,8 @@ class CasePipeline:
     ) -> dict:
         content_hash = _content_hash(payload)
         if self._dsn is None:
+            from datetime import datetime, timezone
+
             rows = self._artifacts.setdefault((case_id, revision_id), [])
             for row in rows:
                 if row["artifact_type"] == artifact_type and row["state"] == "current":
@@ -390,6 +413,9 @@ class CasePipeline:
                 "content_hash": content_hash,
                 "payload": json.loads(_canonical(payload)),
                 "state": "current",
+                # Record-level only: never part of the hashed payload.
+                # Lets approval prove the calculation postdates the review.
+                "stored_at": datetime.now(timezone.utc).isoformat(),
             }
             rows.append(record)
             return dict(record)
@@ -454,6 +480,342 @@ class CasePipeline:
                     (state, case_id, revision_id, org),
                 )
             conn.commit()
+
+    def _set_package_ready(
+        self, org: str, case_id: str, revision_id: str
+    ) -> None:
+        """Promote a recomputed draft to officer review (draft -> ready only).
+
+        Never overwrites an approved draft; a replayed recalculation is a
+        no-op success.
+        """
+        if self._dsn is None:
+            repo = self._events_repo
+            mark = getattr(repo, "mark_package_ready", None)
+            if mark is None:
+                raise PermanentRunError("no revision repository bound")
+            try:
+                mark(case_id, revision_id)
+            except (KeyError, LookupError) as error:
+                raise PermanentRunError(
+                    f"unknown revision {revision_id} for case {case_id}"
+                ) from error
+            return
+        import psycopg
+
+        with psycopg.connect(self._dsn, autocommit=False) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "update public.case_revisions"
+                    " set package_state = 'ready_for_officer_review'"
+                    " where case_id = %s and revision_id = %s"
+                    " and organization_id = %s and package_state = 'draft'",
+                    (case_id, revision_id, org),
+                )
+            conn.commit()
+
+    # -- recalculation path ------------------------------------------
+
+    #: Review decision kind -> calculator decision for the recomputation.
+    _RECALC_DECISIONS = {
+        "accept_evidence": "approve_addback",
+        "reject_evidence": "reject_addback",
+        "correct_mapping": "pending",
+    }
+
+    def _run_recalculation(self, job, on_progress: Callable[[], None]) -> dict:
+        """Recompute one revision deterministically after a review decision.
+
+        Uses the authoritative fixture case at the head revision's threshold,
+        overlaid with persisted fact amounts when the revision already has
+        pipeline rows, and the typed Decimal calculator. Persists fresh
+        calculation/coverage/trace/package artifacts (stale rotation),
+        completes the run, and promotes the package to ready only when zero
+        blocking issues remain.
+        """
+        from src.covenant.calculator import CovenantCalculator
+        from src.covenant.domain import ReviewerDecision, money_str
+
+        payload = dict(job.payload or {})
+        org = self._resolve_org(job)
+        case_id = job.case_id
+        revision_id = job.revision_id
+        decision_kind = str(payload.get("decision_kind") or "")
+        calc_decision = ReviewerDecision(
+            self._RECALC_DECISIONS.get(decision_kind, "pending")
+        )
+        head_threshold, _ = self._recalculation_head(case_id, org, revision_id)
+        on_progress()
+        computed = self._recompute_revision(
+            case_id, org, revision_id, head_threshold, calc_decision)
+        on_progress()
+        if computed is None:
+            # Missing facts or zero denominator: still paused, never ready.
+            self._set_run_state(org, case_id, revision_id, "waiting_review")
+            self._append_event(
+                case_id, org, revision_id, job.id, "REVIEW_REQUIRED",
+                {"job_id": job.id, "revision_id": revision_id,
+                 "reason": "recalculation produced no ratio"},
+            )
+            self._append_event(
+                case_id, org, revision_id, job.id, "RUN_COMPLETED",
+                {"job_id": job.id, "revision_id": revision_id,
+                 "status": "waiting_review"},
+            )
+            on_progress()
+            return {"status": "waiting_review", "revision_id": revision_id,
+                    "artifacts": [], "calculation": None, "error": None}
+        ratio_s = computed["ratio"]
+        threshold_s = computed["threshold"]
+        calc_payload = {
+            "ratio": ratio_s,
+            "threshold": threshold_s,
+            "comparator": computed["comparator"],
+            "formula": computed["formula"],
+            "inputs": computed["inputs"],
+            "decision_kind": decision_kind,
+            "job_id": job.id,
+            "recalculation": True,
+        }
+        coverage_payload = {
+            "status": "complete_for_declared_scope",
+            "assessed": [computed.get("rule_id", "")],
+            "excluded": [],
+        }
+        stored_calc = self._store_artifact(
+            org, case_id, revision_id, "calculation", calc_payload)
+        stored_coverage = self._store_artifact(
+            org, case_id, revision_id, "coverage", coverage_payload)
+        trace_payload = {
+            "job_id": job.id,
+            "revision_id": revision_id,
+            "decision_kind": decision_kind,
+            "stages": ["recalculate", "finalize"],
+            "calculation_hash": stored_calc["content_hash"],
+        }
+        stored_trace = self._store_artifact(
+            org, case_id, revision_id, "audit_trace", trace_payload)
+        package_payload = {
+            "revision_id": revision_id,
+            "status": "draft",
+            "calculation_hash": stored_calc["content_hash"],
+            "coverage_hash": stored_coverage["content_hash"],
+            "manifest_hash": self._current_artifact_hash(
+                case_id, revision_id, org, "evidence_manifest")
+            or stored_calc["content_hash"],
+            "trace_hash": stored_trace["content_hash"],
+        }
+        stored_package = self._store_artifact(
+            org, case_id, revision_id, "draft_package", package_payload)
+        on_progress()
+        self._set_run_state(org, case_id, revision_id, "completed")
+        self._append_event(
+            case_id, org, revision_id, job.id, "CALCULATION_COMPLETED",
+            {"job_id": job.id, "revision_id": revision_id,
+             "ratio": ratio_s, "threshold": threshold_s,
+             "decision_kind": decision_kind},
+        )
+        self._append_event(
+            case_id, org, revision_id, job.id, "RECALCULATION_COMPLETED",
+            {"job_id": job.id, "revision_id": revision_id,
+             "decision_kind": decision_kind},
+        )
+        self._append_event(
+            case_id, org, revision_id, job.id, "RUN_COMPLETED",
+            {"job_id": job.id, "revision_id": revision_id,
+             "status": "completed"},
+        )
+        on_progress()
+        # Readiness is rechecked after the recomputation, never assumed:
+        # only a completed current run with zero blocking issues may wait
+        # for the officer.
+        _, open_issues = self._recalculation_head(case_id, org, revision_id)
+        if open_issues == 0:
+            self._set_package_ready(org, case_id, revision_id)
+            self._append_event(
+                case_id, org, revision_id, job.id, "PACKAGE_REVISED",
+                {"job_id": job.id, "revision_id": revision_id},
+            )
+        stored = [stored_calc, stored_coverage, stored_trace, stored_package]
+        return {
+            "status": "completed",
+            "revision_id": revision_id,
+            "artifacts": [
+                {"artifact_type": a["artifact_type"],
+                 "content_hash": a["content_hash"]} for a in stored
+            ],
+            "calculation": {
+                "ratio": ratio_s,
+                "threshold": threshold_s,
+                "comparator": computed["comparator"],
+            },
+            "error": None,
+        }
+
+    def _recalculation_head(self, case_id: str, org: str,
+                            revision_id: str) -> tuple[str, int]:
+        """Return (head threshold, open issue count), rejecting stale jobs."""
+        if self._dsn is None:
+            repo = self._events_repo
+            snapshot = getattr(repo, "snapshot", None)
+            if snapshot is None:
+                raise PermanentRunError("no revision repository bound")
+            try:
+                snap = snapshot(case_id)
+            except (KeyError, LookupError) as error:
+                raise PermanentRunError(
+                    f"unknown case {case_id}") from error
+            if snap["revision"]["revision_id"] != revision_id:
+                raise PermanentRunError(
+                    f"recalculation targets superseded revision {revision_id}")
+            return (str(snap["revision"]["threshold"]),
+                    int(snap["open_review_issues"]))
+        import psycopg
+
+        with psycopg.connect(self._dsn, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select revision_id, threshold from public.case_revisions"
+                    " where case_id = %s and organization_id = %s"
+                    " order by created_at desc limit 1",
+                    (case_id, org),
+                )
+                row = cur.fetchone()
+                if row is None or str(row[0]) != revision_id:
+                    raise PermanentRunError(
+                        f"recalculation targets superseded revision {revision_id}")
+                cur.execute(
+                    "select count(*) from public.review_issues"
+                    " where case_id = %s and organization_id = %s"
+                    " and revision_id = %s and status = 'open'",
+                    (case_id, org, revision_id),
+                )
+                return (str(row[1]), int(cur.fetchone()[0]))
+
+    #: EBITDA component keys shared with the supported upload path: a
+    #: recalculation on a revision with persisted evidence must reproduce
+    #: the worker's arithmetic exactly, never a different formula.
+    _RECALC_EBITDA_KEYS = ("net_income", "income_tax", "interest_expense",
+                           "depreciation", "amortization")
+
+    def _recompute_revision(self, case_id: str, org: str, revision_id: str,
+                            head_threshold: str, calc_decision) -> dict | None:
+        """Deterministic Decimal recomputation; None when no ratio issues.
+
+        Revisions with persisted pipeline evidence reuse the supported
+        path's arithmetic over those amounts at the head threshold.
+        Revisions without uploads compute from the authoritative fixture
+        case at the head threshold. Both stay in typed Python Decimal.
+        """
+        comparator, persisted, rule_id = self._persisted_rule_and_facts(
+            case_id, revision_id, org)
+        if comparator is not None and persisted:
+            amounts = {}
+            for key in (*self._RECALC_EBITDA_KEYS, "funded_debt"):
+                raw = persisted.get(key)
+                if raw is None:
+                    return None
+                amounts[key] = Decimal(str(raw))
+            ebitda = sum((amounts[k] for k in self._RECALC_EBITDA_KEYS),
+                         Decimal("0"))
+            funded_debt = amounts["funded_debt"]
+            if ebitda == 0:
+                return None
+            ratio = (funded_debt / ebitda).quantize(
+                _TWO_PLACES, rounding=ROUND_HALF_UP)
+            return {
+                "ratio": _exact(ratio),
+                "threshold": _exact(Decimal(str(head_threshold))),
+                "comparator": comparator,
+                "formula": "Consolidated Funded Debt / Consolidated Adjusted EBITDA",
+                "rule_id": rule_id or "",
+                "inputs": {k: _exact(v) for k, v in persisted.items()},
+            }
+        case = self._recalculation_case(case_id, head_threshold)
+        from src.covenant.calculator import CovenantCalculator
+        from src.covenant.domain import money_str
+
+        calculation, _calc_issues = CovenantCalculator().calculate(
+            case, calc_decision)
+        if calculation.ratio is None:
+            return None
+        return {
+            "ratio": money_str(calculation.ratio),
+            "threshold": money_str(calculation.threshold),
+            "comparator": calculation.comparator,
+            "formula": case.rule.formula_label,
+            "rule_id": case.rule.id,
+            "inputs": {line.fact_key: money_str(line.amount)
+                       for line in calculation.lines if line.included},
+        }
+
+    def _recalculation_case(self, case_id: str, head_threshold: str):
+        """Authoritative fixture case at the head revision's threshold."""
+        provider = self.case_provider
+        if provider is None:
+            raise PermanentRunError(
+                "fixture recalculation is unavailable: no case provider")
+        try:
+            base = provider(case_id)
+        except Exception as error:
+            raise PermanentRunError(
+                f"unknown case {case_id}") from error
+        return base.model_copy(update={"rule": base.rule.model_copy(
+            update={"threshold": float(head_threshold)})})
+
+    def _persisted_rule_and_facts(self, case_id: str, revision_id: str,
+                                  org: str) -> tuple[str | None, dict, str | None]:
+        """Persisted (comparator, {fact_key: amount}, rule id) for a revision."""
+        if self._dsn is None:
+            comparator, rule_id = None, None
+            for (c, r, _), row in self._rules.items():
+                if c == case_id and r == revision_id:
+                    comparator = row.get("comparator")
+                    rule_id = row.get("external_rule_id")
+                    break
+            amounts = {key: row["amount"]
+                       for (c, r, key), row in self._facts.items()
+                       if c == case_id and r == revision_id}
+            return comparator, amounts, rule_id
+        import psycopg
+
+        with psycopg.connect(self._dsn, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select comparator, external_rule_id from public.covenant_rules"
+                    " where case_id = %s and revision_id = %s limit 1",
+                    (case_id, revision_id),
+                )
+                rule = cur.fetchone()
+                cur.execute(
+                    "select fact_key, amount from public.financial_facts"
+                    " where case_id = %s and revision_id = %s",
+                    (case_id, revision_id),
+                )
+                return ((str(rule[0]) if rule else None),
+                        {str(k): str(v) for k, v in cur.fetchall()},
+                        (str(rule[1]) if rule else None))
+
+    def _current_artifact_hash(self, case_id: str, revision_id: str, org: str,
+                               artifact_type: str) -> str | None:
+        if self._dsn is None:
+            rows = [a for a in self._artifacts.get((case_id, revision_id), [])
+                    if a["artifact_type"] == artifact_type
+                    and a["state"] == "current"]
+            return rows[-1]["content_hash"] if rows else None
+        import psycopg
+
+        with psycopg.connect(self._dsn, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select content_hash from public.artifacts"
+                    " where organization_id = %s and case_id = %s"
+                    " and revision_id = %s and artifact_type = %s"
+                    " and state = 'current' order by created_at desc limit 1",
+                    (org, case_id, revision_id, artifact_type),
+                )
+                row = cur.fetchone()
+                return str(row[0]) if row else None
 
     # -- supported path -----------------------------------------------
 
@@ -572,6 +934,14 @@ class CasePipeline:
                              spans),
                         )
                 conn.commit()
+        self._append_event(
+            case_id, org, revision_id, job.id, "DEFINITIONS_COMPILED",
+            {"job_id": job.id, "rule_id": external_rule_id},
+        )
+        self._append_event(
+            case_id, org, revision_id, job.id, "EVIDENCE_MAPPED",
+            {"job_id": job.id, "fact_count": len(facts)},
+        )
         on_progress()
 
         inputs = {fact.key: _exact(fact.amount) for fact in facts}
@@ -601,6 +971,11 @@ class CasePipeline:
             "assessed": [external_rule_id],
             "excluded": [],
         }
+        self._append_event(
+            case_id, org, revision_id, job.id, "CALCULATION_STARTED",
+            {"job_id": job.id, "rule_id": external_rule_id},
+        )
+        on_progress()
         stored_calc = self._store_artifact(
             org, case_id, revision_id, "calculation", calc_payload
         )
@@ -692,6 +1067,15 @@ class CasePipeline:
             org, case_id, revision_id, "evidence_manifest", manifest_payload
         )
         on_progress()
+        review_repo = self._events_repo
+        if review_repo is None and self._dsn is not None:
+            from .revision_repository import PostgresRevisionRepository
+            review_repo = PostgresRevisionRepository(self._dsn)
+        if review_repo is not None:
+            head = review_repo.current(case_id)
+            review_repo.open_review_issue(
+                case_id, org, revision_id, head.input_bundle_hash
+            )
         self._set_run_state(org, case_id, revision_id, "waiting_review")
         self._append_event(
             case_id, org, revision_id, job.id, "REVIEW_REQUIRED",

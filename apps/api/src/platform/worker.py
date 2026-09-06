@@ -237,6 +237,31 @@ def main() -> None:
         platform._bucket,  # noqa: SLF001
     )
     pipeline = _Pipeline(configured_database_url(), storage)
+    # Recalculation jobs on revisions without uploaded documents recompute
+    # from the authoritative fixture case; derived case ids fall back to
+    # their catalog template.
+    from src.covenant import UnknownCaseError, build_demo_workflow
+
+    _demo = build_demo_workflow()
+    try:
+        from src.covenant.revision_repository import PostgresRevisionRepository
+
+        _pg = PostgresRevisionRepository(configured_database_url()) \
+            if configured_database_url() else None
+    except Exception:
+        _pg = None
+
+    def _case_provider(case_id: str):
+        try:
+            return _demo._repository.get_case(case_id)  # noqa: SLF001
+        except UnknownCaseError:
+            if _pg is not None:
+                template = _pg.case_template(case_id)
+                if template is not None:
+                    return _demo._repository.get_case(template)  # noqa: SLF001
+            raise
+
+    pipeline.case_provider = _case_provider
     worker = Worker(store, pipeline, worker_id=worker_id, lease_seconds=lease_seconds)
     worker.run_forever(poll_interval_seconds=poll_interval)
 

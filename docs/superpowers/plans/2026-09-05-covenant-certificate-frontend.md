@@ -4,7 +4,7 @@
 
 **Goal:** Build a polished finance workbench that makes contract interpretation, evidence, deterministic calculation, and human review visible in under three minutes.
 
-**Architecture:** Adapt the CopilotKit LangGraph FastAPI starter in `apps/web`. AG-UI synchronizes typed case state and review interrupts. The main interface is a domain workbench; chat is secondary.
+**Architecture:** Adapt the CopilotKit LangGraph FastAPI starter in `apps/web`. AG-UI synchronizes typed case state and review interrupts. The main interface is a chat-first CFO workspace with case navigation on the left and workflow, evidence, and artifact context on the right.
 
 **Tech Stack:** Next.js 16, React 19, TypeScript, CopilotKit, AG-UI, Tailwind CSS, Radix primitives, Recharts, React Flow for the definition graph, Vitest, Testing Library, Playwright.
 
@@ -12,28 +12,41 @@
 
 **Controlling revision:** `docs/implementation-contract.md`. Revision-aware results, declared coverage and server-authorized review take precedence over the earlier starter behavior. This is an implementation plan; no UI has yet been verified.
 
+**Controlling frontend design:** `docs/superpowers/specs/2026-09-06-chat-first-cfo-workspace-design.md`. It supersedes the earlier landing-page and stacked-dashboard presentation.
+
+## Task 0: Close the human-review safety gap
+
+- [ ] Add a failing integration test proving officer approval is rejected while the current run is `waiting_review`, the result is stale, or no current calculation artifact exists.
+- [ ] Make `request_document` and unresolved decisions remain blocking.
+- [ ] After an accepted, rejected, or corrected decision, invalidate affected outputs and resume or enqueue the exact revision for deterministic recomputation.
+- [ ] Publish decision-recorded, recalculation-started, recalculation-completed, controls-checked, and package-ready events.
+- [ ] Allow `ready_for_officer_review` only after the current run completes with zero blockers and a current package hash.
+- [ ] Re-run backend tests and the browser approval journey before starting visual work.
+
 ## Visual direction
 
 Use an institutional forensic-ledger style: warm off-white document surfaces, graphite navigation, restrained blue for evidence, amber for review, red for breach, and green only for proved compliance. Use a readable sans face for interface text and tabular numerals for calculations. Avoid generic gradients, floating chatbot cards, decorative glass, and card grids with equal visual weight.
 
 The main demonstration shows an amendment or financial update changing a case, the affected evidence path, an exception resolved by a human, and a revised draft package. The two-agreement view is a secondary, clearly labelled hypothetical comparison when contracts do not govern the same borrower.
 
-## Task 1: Remove the starter demo and establish the design system
+## Task 1: Replace the landing page and establish the design system
 
 - [ ] Delete weather, proverb, todo, flight, and sample canvas behavior.
+- [ ] Remove the marketing hero, curated-card grid, separate chat showcase, and stacked case dashboard.
 - [ ] Add typed color, spacing, typography, radius, shadow, and motion tokens in `apps/web/src/app/globals.css`.
 - [ ] Create shared `StatusBadge`, `EvidenceLink`, `Money`, `Ratio`, `EmptyState`, `ErrorState`, and `Skeleton` components.
 - [ ] Add Vitest and Testing Library. Test status colors, numeric formatting, keyboard focus, and accessible names.
 - [ ] Commit `feat: establish covenant workbench design system`.
 
-## Task 2: Build the application shell and case navigation
+## Task 2: Build the chat-first CFO application shell
 
-- [ ] Create a three-region desktop shell: case rail, central workbench, review/activity rail.
-- [ ] Create a compact mobile layout with case drawer and review bottom sheet.
+- [ ] Create a three-region desktop shell: case rail, central conversation, and tabbed Workflow/Evidence/Artifacts rail.
+- [ ] Support 1024 px and 1440 px desktop layouts. Below 1024 px, show a clear desktop-required state instead of compressing finance controls.
+- [ ] Put the message/document composer at the bottom of the central conversation.
 - [ ] Add case states, document counts, test period, and last activity to the case rail.
 - [ ] Display run state, per-covenant result, assessed/unsupported scope and package approval separately. A failed supported test remains visible even when the package has other unresolved issues.
 - [ ] Preserve a visible connection and processing state without exposing raw chain-of-thought.
-- [ ] Test 375, 768, 1024, and 1440 pixel widths.
+- [ ] Test 1024 and 1440 pixel widths plus the below-1024 desktop-required state.
 - [ ] Commit `feat: add covenant case workspace shell`.
 
 ## Task 3: Add authenticated case creation and document intake
@@ -53,6 +66,7 @@ The main demonstration shows an amendment or financial update changing a case, t
 - [ ] Render named work stages: Documents, Policy, Evidence, Calculation, Control Review, Officer Review.
 - [ ] Build a right-side activity rail that renders agent role, node name, tool label, running/success/failure state, latency and safe input/output summaries.
 - [ ] Group tool calls under their workflow node and let users expand citations or generated artifacts without showing raw prompts or chain-of-thought.
+- [ ] Render stage, tool, clause, evidence, calculation, review, revision-diff, and draft-package cards inline in the conversation.
 - [ ] Update the central workbench from `EVIDENCE_FOUND`, `DEFINITION_RESOLVED`, `CALCULATION_COMPLETED`, `REVIEW_REQUIRED`, `RESULT_INVALIDATED`, `APPROVAL_INVALIDATED` and `PACKAGE_REVISED` events.
 - [ ] Show concurrent legal and financial branches separately, then animate their join at evidence mapping. Derive progress only from completed required stages.
 - [ ] Support reconnect from last event sequence and distinguish retryable connection failure from case failure.
@@ -86,6 +100,8 @@ The main demonstration shows an amendment or financial update changing a case, t
 - [ ] Add a separate officer approval screen for the completed draft.
 - [ ] Test authorization, double submission, stale decision, reconnect, rejection, and resumed workflow.
 - [ ] Submit issue ID, revision ID, expected hash and idempotency key; on HTTP 409 refresh the issue and require renewed review. Never set an approved result optimistically from client shared state.
+- [ ] Display decision recorded -> recalculating -> controls checked -> revised draft ready. Do not mark the package ready directly from the resolve response.
+- [ ] Disable or hide privileged mutations for viewer roles; retain a short explanation of the required role.
 - [ ] Commit `feat: add finance review controls`.
 
 ## Task 8: Build the change-and-recheck demonstration
@@ -119,10 +135,12 @@ The main demonstration shows an amendment or financial update changing a case, t
 ## Task 10: Complete accessibility, error, and visual QA
 
 - [ ] Ensure every status uses icon and text in addition to color.
-- [ ] Test keyboard order, focus restoration after interrupts, dialogs, drawers, graph alternatives, and screen-reader labels.
+- [ ] Test keyboard order, focus restoration after interrupts, dialogs, collapsible rails, graph alternatives, and screen-reader labels.
 - [ ] Add Playwright journeys for pass, breach, review, amendment, reconnect, and unauthorized access.
-- [ ] Run responsive screenshots at 375, 768, 1024, and 1440 pixels in light and dark modes.
+- [ ] Run screenshots at 1024 and 1440 pixels in light and dark modes; verify the desktop-required state below 1024 px.
 - [ ] Remove unused starter code and confirm no demo-user identity or public secret remains.
+- [ ] Prove prepared templates cannot be mutated directly; every demo starts from a fresh derived case or an explicit reset.
+- [ ] Prove generated copy never calls an internally approved draft a signed certificate.
 - [ ] Run production build, type check, unit tests, and Playwright tests.
 - [ ] Commit `test: verify covenant workbench`.
 
@@ -133,4 +151,4 @@ The main demonstration shows an amendment or financial update changing a case, t
 - Every displayed number opens its source.
 - Missing evidence blocks the result and creates a clear review action.
 - No raw chain-of-thought, secret, or private document body appears in operational logs.
-- The full demonstration works at 1440 pixels and the review path remains usable at 375 pixels.
+- The full demonstration works at 1024 and 1440 pixels. Smaller screens receive a clear desktop-required state.

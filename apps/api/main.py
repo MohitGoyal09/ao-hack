@@ -282,6 +282,33 @@ def _ensure_revisions(case_id: str, principal: Principal,
     return org_id
 
 
+def _catalog_template_ids() -> frozenset[str]:
+    """Curated prepared case ids: read-only templates, never working state."""
+    try:
+        return frozenset(c["id"] for c in workflow.list_cases())
+    except Exception:
+        return frozenset()
+
+
+def _reject_catalog_mutation(case_id: str) -> None:
+    """Refuse direct mutation of a prepared catalog case (G0.7).
+
+    Reads (describe/snapshot/run/impact/jobs/events) keep working on
+    catalog ids; revisions, uploads, review resolutions and approvals
+    must target a derived working case minted by POST /api/cases, so
+    demo/QA never piles state onto the shared template identity.
+    Callers place this after auth/role checks so 401/403/404 keep
+    their existing precedence over the 409.
+    """
+    if case_id in _catalog_template_ids():
+        raise HTTPException(
+            status_code=409,
+            detail=f"case '{case_id}' is a read-only catalog template; "
+            "create a derived working case with POST /api/cases "
+            f'{{"template_case_id": "{case_id}"}} and mutate that instead',
+        )
+
+
 def _start_inprocess_worker(app: FastAPI) -> threading.Event | None:
     """Offline demo only: drain the MemoryJobStore from a daemon thread.
 
@@ -304,6 +331,10 @@ def _start_inprocess_worker(app: FastAPI) -> threading.Event | None:
         revision_repository=revision_repository
         if isinstance(revision_repository, MemoryRevisionRepository) else None,
     )
+    # Recalculation jobs on revisions without uploaded documents recompute
+    # from the authoritative fixture case (derived ids resolve to their
+    # template through the catalog hook).
+    pipeline.case_provider = lambda case_id: workflow._repository.get_case(case_id)  # noqa: SLF001
     # ponytail: documents shared by attribute; add a ctor kwarg if a third caller appears.
     pipeline.documents = _documents
     stop = threading.Event()
@@ -465,10 +496,13 @@ async def create_case(
         case_id=case_id, organization_id=org_id, user_id=principal.user_id,
         test_date=str(body.test_date) if body.test_date else template.test_date,
         rule_id=template.rule.id, threshold=template.rule.threshold,
-        doc_ids=[d.id for d in template.documents],
-        fact_keys=[f.key for f in template.facts],
+        # A prepared starter supplies configuration, not evidence. The private
+        # case remains empty until the user or agent attaches source material.
+        doc_ids=[],
+        fact_keys=[],
         name=name, borrower_name=template.name.split(":")[0].strip(),
         facility_name=template.agreement, template_case_id=template.id,
+        seed_review_issue=False,
     )
     return {"case_id": case_id, "organization_id": org_id,
             "template_case_id": template.id, "name": name}
@@ -545,6 +579,7 @@ async def create_revision(
     authorization = request.headers.get("authorization")
     org_id = _ensure_revisions(case_id, principal, authorization)
     _require_case_member(case_id, principal, authorization)
+    _reject_catalog_mutation(case_id)
     try:
         rev, changeset, impact = repo.create_revision(
             case_id=case_id,
@@ -612,8 +647,9 @@ async def resolve_issue(
         raise HTTPException(status_code=404, detail="Unknown review issue")
     if role not in REVIEWER_ROLES:
         raise HTTPException(status_code=403, detail="Insufficient role")
+    _reject_catalog_mutation(case_id)
     try:
-        return repo.resolve_issue(
+        response = repo.resolve_issue(
             issue_id=issue_id,
             organization_id=org_id,
             user_id=principal.user_id,
@@ -633,6 +669,27 @@ async def resolve_issue(
         raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    if response.get("status") != "resolved" or "recalculation" not in response:
+        # Blocking decisions (request_document / mark_unresolved) record the
+        # request and stay open: no recomputation, no readiness.
+        return response
+    # An invalidating decision queues a durable recalculation for the same
+    # current revision. The package is never marked ready here; readiness
+    # follows only after the recomputation completes with zero blockers.
+    job_store = request.app.state.durability_runtime.job_store
+    payload = {"recalculation": True,
+               "decision_kind": response.get("decision_kind", ""),
+               "organization_id": org_id}
+    try:
+        job = job_store.enqueue(
+            case_id, str(body.get("revision_id", "")), payload)
+        return {**response, "job_id": job.id}
+    except JobConflictError:
+        for queued in _jobs_for_case(job_store, case_id):
+            if (queued.revision_id == str(body.get("revision_id", ""))
+                    and queued.state in ("queued", "running", "waiting_review")):
+                return {**response, "job_id": queued.id}
+        return {**response, "job_id": None}
 
 
 @app.post("/api/cases/{case_id}/officer-approval")
@@ -649,35 +706,28 @@ async def officer_approval(
     role = repo.get_member_role(org_id, principal.user_id)
     if role not in OFFICER_ROLES:
         raise HTTPException(status_code=403, detail="Officer role is required")
-    try:
-        case = workflow._repository.get_case(case_id)  # noqa: SLF001
-    except UnknownCaseError as error:
-        raise HTTPException(status_code=404, detail="Unknown covenant case") from error
-    from src.covenant.calculator import CovenantCalculator
-    from src.covenant.domain import ReviewerDecision, money_str
-
+    _reject_catalog_mutation(case_id)
     revision_id = str(body.get("revision_id", ""))
     try:
-        head = repo.get(case_id, revision_id)
+        repo.get(case_id, revision_id)
     except UnknownRevisionError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    # Fresh numbers: the worker's calculation artifact for this revision when
-    # one exists (uploaded documents), else the fixture case at the head threshold.
+    # Fresh numbers come only from the revision's current calculation
+    # artifact. There is no fixture fallback: approving without a
+    # post-decision recomputation is the unsafe path this gate closes.
     calc_artifact = next(
         (a for a in repo.artifacts_for(case_id, revision_id)
          if a["artifact_type"] == "calculation"), None)
-    if calc_artifact is not None:
-        calc = calc_artifact["payload"]
-        fresh_ratio, fresh_threshold = calc.get("ratio"), calc.get("threshold")
-        fresh_comparator = calc.get("comparator")
-        fresh_inputs = dict(calc.get("inputs") or {})
-    else:
-        rule = case.rule.model_copy(update={"threshold": float(head.threshold)})
-        calculation, _ = CovenantCalculator().calculate(case.model_copy(update={"rule": rule}), ReviewerDecision.PENDING)
-        fresh_ratio = None if calculation.ratio is None else money_str(calculation.ratio)
-        fresh_threshold = money_str(calculation.threshold)
-        fresh_comparator = calculation.comparator
-        fresh_inputs = {line.fact_key: money_str(line.amount) for line in calculation.lines if line.included}
+    if calc_artifact is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"revision {revision_id} has no current calculation "
+            "artifact; recalculation is required",
+        )
+    calc = calc_artifact["payload"]
+    fresh_ratio, fresh_threshold = calc.get("ratio"), calc.get("threshold")
+    fresh_comparator = calc.get("comparator")
+    fresh_inputs = dict(calc.get("inputs") or {})
     try:
         binding = repo.approve(
             case_id=case_id,
@@ -791,6 +841,7 @@ async def upload_case_document(
         raise HTTPException(status_code=404, detail="Unknown covenant case")
     if role not in REVIEWER_ROLES:
         raise HTTPException(status_code=403, detail="Insufficient role")
+    _reject_catalog_mutation(case_id)
     data = bytearray()
     while True:
         chunk = await file.read(1 << 20)
@@ -834,6 +885,7 @@ async def upload_case_document(
             change_kind="document_upload",
             documents=[version.document_id],
             facts=[],
+            open_review_issue=False,
         )
     except UnknownRevisionError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -847,15 +899,6 @@ async def upload_case_document(
         "DOCUMENT_UPLOADED",
         {"document_id": version.document_id, "version": version.version_number},
     )
-    job_store = request.app.state.durability_runtime.job_store
-    try:
-        job = job_store.enqueue(
-            case_id,
-            new_rev.revision_id,
-            {"document_id": version.document_id, "version": version.version_number},
-        )
-    except JobConflictError as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
     return {
         "document_id": version.document_id,
         "version_id": version.id,
@@ -863,7 +906,7 @@ async def upload_case_document(
         "sha256": version.sha256,
         "extraction_state": version.extraction_state,
         "revision_id": new_rev.revision_id,
-        "job_id": job.id,
+        "job_id": None,
     }
 
 

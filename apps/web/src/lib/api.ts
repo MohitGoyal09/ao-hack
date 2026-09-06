@@ -38,7 +38,7 @@ export type Snapshot = {
   open_review_issues: number; documents: unknown[]; approvals: Approval[]; last_event_sequence: number; organization_id?: string | null;
   review_issues?: ReviewIssue[]; artifacts?: { calculation?: CalculationArtifact } & Record<string, unknown>; financial_facts?: unknown; covenant_rules?: unknown; revisions?: Revision[];
 };
-export type UploadResult = { document_id: string; version_id: string; version_number: number; sha256: string; extraction_state: string; revision_id: string; job_id: string };
+export type UploadResult = { document_id: string; version_id: string; version_number: number; sha256: string; extraction_state: string; revision_id: string; job_id: string | null };
 // GET /cases (member-scoped) and POST /cases (fresh case from a catalog template).
 export type CaseListItem = { case_id: string; name: string; template_case_id: string | null; test_date: string | null; created_at: string | null; run_state: string | null };
 export type CreatedCase = { case_id: string; organization_id: string; template_case_id: string; name: string };

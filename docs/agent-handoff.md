@@ -97,7 +97,7 @@ Fresh checks on 2026-09-06 (audit wave at `d0cc6c6`, refreshed by the integratio
 | Area | Status |
 |---|---|
 | Git | local `main` is ahead of `origin/main` by the 2026-09-06 build-session commits (`git log origin/main..main`); nothing pushed by agents |
-| Backend tests | suite green offline (`tests/test__env.py` blanks the DB vars); the suite prints its own count (159 OK, 13 skipped on 2026-09-06 after the second build wave) |
+| Backend tests | suite green offline (`tests/test__env.py` blanks the DB vars); the suite prints its own count (171 OK, 13 skipped on 2026-09-06 after the review-safety + catalog-immutability session) |
 | Frontend | `npm ci` and production build passed at `d0cc6c6`; production build passes (`/`, `/cases/[id]`, `/cases/[id]/workpaper`, two API routes) |
 | Dependency audit | `npm audit --omit=dev`: 18 findings, 0 critical, all transitive under `next`/`hono` |
 | Supabase project | `ao-hack`, `ap-south-1`, active and linked; hosted DB, bucket and Auth verified |
@@ -279,6 +279,12 @@ export, ops) remain open.
 
 | Priority | Gap | Consequence |
 |---|---|---|
+| P0 | ~~Review resolution can mark a package ready and officer approval can succeed while the current run still says `waiting_review` / `NEEDS_REVIEW`~~ fixed 2026-09-06 (uncommitted): resolve records + queues durable recalculation, never ready; approval requires completed run + ready package + current calc artifact; `request_document`/`mark_unresolved` stay blocking (regression: `tests/test_review_approval_safety.py`, 5/5) | recalculation worker path proven offline; hosted worker proof still open |
+| P0 | ~~Current frontend is a landing page plus stacked dashboard, not the approved chat-first CFO workspace~~ chat-first workspace landed 2026-09-06 (uncommitted, `npm run build` green): case rail, structured conversation, Workflow/Evidence/Artifacts rail, composer, 7 stages, gated review interrupt, sub-1024 desktop gate | browser QA at 1024/1440 px not run; no web test harness yet |
+| P1 | ~~Prepared catalog cases can be mutated directly during QA/demo~~ fixed 2026-09-06 (uncommitted): catalog ids are read-only templates (mutations 409 with derive pointer); `POST /api/cases` mints the working copy (regression: `tests/test_catalog_immutability.py`, 7/7). Demo/QA must derive first — direct catalog-id resolve/approve/upload now 409s | snapshot still seeds pristine rev-1 on first catalog read (read-only); Postgres-path proof is opt-in skips |
+| Out of scope | Mobile workbench | hackathon product is desktop-only; below 1024 px show a desktop-required state instead of compressed controls |
+| P1 | ~~Viewer sees enabled privileged controls~~ fixed 2026-09-06 (uncommitted): viewer-gated composer, case creation, upload, review, amendment, approval with required-role notes; backend 403 stays authoritative | browser QA not run |
+| P1 | ~~Copilot response can say “sign the final certificate”~~ fixed 2026-09-06 (uncommitted): UI copy is “internally approved draft” (`grep` clean); Inspector/dev chrome off in builds | model-generated phrasing still unverified against a live model |
 | P0 | ~~Global in-memory `RevisionStore`~~ done 2026-09-05: Postgres repository with reconstruction-proof tests; memory remains explicit offline mode only | migration applied hosted 2026-09-06 |
 | P0 | ~~Revision/review/approval routes lack auth~~ done 2026-09-05: server identity, org membership, reviewer/officer roles, 401/403/404/409 | same as above |
 | P0 | ~~Queue is not wired to API execution~~ done `d0cc6c6`: `src/platform/worker.py` + `CasePipeline` | worker fixes (real storage adapter, `.env`, compose `worker` service) in the 2026-09-06 session; real worker entrypoint processed a hosted upload during integration |
@@ -539,7 +545,7 @@ Owner: `apps/web/`. Start after backend contracts are stable.
 - Add loading, empty, error, reconnect, offline, and permission states.
 
 Done when: a reviewer can complete upload through exact draft approval in the UI.
-Test desktop, 375 px, keyboard-only, and a screen-reader smoke path.
+Test 1024/1440 px desktop, keyboard-only, and a screen-reader smoke path.
 
 ### Phase 8 — Build the accuracy harness
 
@@ -642,7 +648,7 @@ acceptance blocked. Do not claim it passed.
 | Agent | Gemini tool calls, refusal, interrupt/resume, calculation parity |
 | Stream | ordered events, reconnect, replay, redaction, backpressure |
 | API | authenticated full flow and stale conflicts |
-| Browser | upload through approval on desktop and 375 px |
+| Browser | upload through approval at 1024 and 1440 px; desktop-required state below 1024 px |
 | Evaluation | reviewed labels, family split, holdout, false-pass count |
 | Deployment | migration, readiness, rollback, restart, smoke path |
 

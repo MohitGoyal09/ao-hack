@@ -41,13 +41,22 @@ def _upload(client, case_id, headers, *, data=PDF_BYTES, filename="agreement.pdf
 class IntakeApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
+        # Catalog templates are read-only: every upload test mints a fresh
+        # derived working case (also the demo/QA reset affordance).
+        created = self.client.post(
+            "/api/cases",
+            json={"template_case_id": CASE_ID, "name": "Intake probe"},
+            headers=REVIEWER,
+        )
+        assert created.status_code == 200, created.text
+        self.case_id = created.json()["case_id"]
 
     def test_unauthenticated_upload_returns_401(self) -> None:
-        response = _upload(self.client, CASE_ID, {})
+        response = _upload(self.client, self.case_id, {})
         self.assertEqual(response.status_code, 401)
 
-    def test_happy_path_upload_creates_version_revision_and_job(self) -> None:
-        response = _upload(self.client, CASE_ID, REVIEWER)
+    def test_happy_path_upload_registers_version_and_waits_for_agent(self) -> None:
+        response = _upload(self.client, self.case_id, REVIEWER)
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         for key in ("document_id", "version_id", "version_number", "sha256",
@@ -56,12 +65,7 @@ class IntakeApiTests(unittest.TestCase):
         self.assertNotIn("data", body)
         self.assertNotIn("content", body)
 
-        job_store = app.state.durability_runtime.job_store
-        job = job_store.get(body["job_id"])
-        self.assertIsNotNone(job)
-        self.assertEqual(job.case_id, CASE_ID)
-        self.assertEqual(job.revision_id, body["revision_id"])
-        self.assertEqual(job.payload.get("document_id"), body["document_id"])
+        self.assertIsNone(body["job_id"])
 
         meta = self.client.get(f"/api/documents/{body['document_id']}",
                                headers=REVIEWER)
@@ -73,9 +77,9 @@ class IntakeApiTests(unittest.TestCase):
 
     def test_second_upload_with_document_id_bumps_version(self) -> None:
         document_id = f"intake-doc-{uuid.uuid4().hex[:8]}"
-        first = _upload(self.client, CASE_ID, REVIEWER, document_id=document_id)
+        first = _upload(self.client, self.case_id, REVIEWER, document_id=document_id)
         self.assertEqual(first.status_code, 200, first.text)
-        second = _upload(self.client, CASE_ID, REVIEWER, document_id=document_id,
+        second = _upload(self.client, self.case_id, REVIEWER, document_id=document_id,
                          data=b"%PDF-1.4 second version\n")
         self.assertEqual(second.status_code, 200, second.text)
         self.assertEqual(second.json()["document_id"], document_id)
@@ -87,12 +91,12 @@ class IntakeApiTests(unittest.TestCase):
 
     def test_oversize_upload_returns_413(self) -> None:
         big = b"x" * (int(MAX_BYTES) + 1)
-        response = _upload(self.client, CASE_ID, REVIEWER, data=big)
+        response = _upload(self.client, self.case_id, REVIEWER, data=big)
         self.assertEqual(response.status_code, 413)
 
     def test_unsupported_media_returns_422(self) -> None:
         response = _upload(
-            self.client, CASE_ID, REVIEWER,
+            self.client, self.case_id, REVIEWER,
             data=b"MZ fake executable",
             filename="evil.exe",
             content_type="application/x-msdownload",
@@ -102,16 +106,16 @@ class IntakeApiTests(unittest.TestCase):
     def test_bad_document_role_returns_422(self) -> None:
         bad_role = "not-a-real-role-xyz"
         self.assertNotIn(bad_role, set(ALLOWED_ROLES))
-        response = _upload(self.client, CASE_ID, REVIEWER,
+        response = _upload(self.client, self.case_id, REVIEWER,
                            document_role=bad_role)
         self.assertEqual(response.status_code, 422)
 
     def test_outsider_cannot_post_or_get_primed_case(self) -> None:
-        primed = _upload(self.client, CASE_ID, REVIEWER)
+        primed = _upload(self.client, self.case_id, REVIEWER)
         self.assertEqual(primed.status_code, 200, primed.text)
         document_id = primed.json()["document_id"]
 
-        outsider_post = _upload(self.client, CASE_ID, OUTSIDER)
+        outsider_post = _upload(self.client, self.case_id, OUTSIDER)
         self.assertEqual(outsider_post.status_code, 404)
         self.assertNotIn("demo-org", outsider_post.text)
 
@@ -121,9 +125,9 @@ class IntakeApiTests(unittest.TestCase):
         self.assertNotIn("demo-org", outsider_get.text)
 
     def test_viewer_upload_is_forbidden(self) -> None:
-        prime = self.client.get(f"/api/cases/{CASE_ID}/snapshot", headers=REVIEWER)
+        prime = self.client.get(f"/api/cases/{self.case_id}/snapshot", headers=REVIEWER)
         self.assertEqual(prime.status_code, 200, prime.text)
-        response = _upload(self.client, CASE_ID, VIEWER)
+        response = _upload(self.client, self.case_id, VIEWER)
         self.assertEqual(response.status_code, 403)
 
     def test_agent_tool_rejects_filesystem_path(self) -> None:

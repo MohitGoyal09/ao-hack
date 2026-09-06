@@ -247,20 +247,14 @@ class MemoryFallbackTests(unittest.TestCase):
         return next(a for a in self.pipeline.artifacts_for("case-1", "rev-1")
                     if a["artifact_type"] == "evidence_manifest")["payload"]
 
-    def test_bundled_10k_fallback_is_labelled_not_silent(self) -> None:
+    def test_missing_case_financials_never_use_bundled_fixture(self) -> None:
         result = self._run(_financials_from(lambda p: p.name == "2023-form-10k.html"))
-        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["status"], "waiting_review")
         sources = self._manifest()["sources"]
         self.assertEqual(sources["rule"]["kind"], "upload")
-        self.assertEqual(sources["facts"]["kind"], "bundled_fixture")
-        self.assertEqual(sources["facts"]["label"], "bundled fixture: Aon 2023 10-K")
-        calc = next(a for a in self.pipeline.artifacts_for("case-1", "rev-1")
-                    if a["artifact_type"] == "calculation")["payload"]
-        self.assertEqual(calc["fact_source"]["kind"], "bundled_fixture")
-        self.assertFalse(calc["period_check"]["matches"])
-        self.assertEqual(calc["period_check"]["measurement_period_end"], "2024-03-31")
-        fact = self.pipeline._facts[("case-1", "rev-1", "funded_debt")]  # noqa: SLF001
-        self.assertEqual(fact["source_spans"][0]["source"]["kind"], "bundled_fixture")
+        self.assertEqual(sources["facts"]["kind"], "none")
+        self.assertFalse(any(a["artifact_type"] == "calculation"
+                             for a in self.pipeline.artifacts_for("case-1", "rev-1")))
 
     def test_case_financial_statement_beats_the_fixture(self) -> None:
         statement = _upload(
@@ -310,7 +304,13 @@ class MemoryFallbackTests(unittest.TestCase):
         self.assertEqual(snap["review_issues"][0]["issue_id"], "case-1-evidence-1")
         self.assertEqual(snap["review_issues"][0]["status"], "open")
         names = [e["name"] for e in repo.list_events("case-1")]
-        self.assertIn("CALCULATION_COMPLETED", names)
+        expected_progress = [
+            "RUN_STARTED", "DOCUMENT_READ", "AGREEMENT_RESOLVED",
+            "DEFINITIONS_COMPILED", "EVIDENCE_MAPPED",
+            "CALCULATION_STARTED", "CALCULATION_COMPLETED", "RUN_COMPLETED",
+        ]
+        positions = [names.index(event) for event in expected_progress]
+        self.assertEqual(positions, sorted(positions))
         pipeline.set_run_state(job, "failed")
         self.assertEqual(repo.snapshot("case-1")["run_state"], "failed")
 

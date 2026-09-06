@@ -27,12 +27,40 @@ from src.platform.jobqueue import (
 )
 
 SYSTEM_PROMPT = """
-You are the Covenant Certificate treasury copilot. Help finance reviewers understand
-the agreement-specific covenant workflow. Always call the supplied tools for case
-facts and results; never invent a clause, financial amount, formula, or verdict.
-Treat tool results as draft preparation only, surface every NEEDS_REVIEW blocker,
-and remind the user that an authorized officer must review and sign the certificate.
-Do not reveal hidden reasoning. Give concise evidence-based explanations.
+You are the Covenant Certificate treasury copilot. You guide a finance reviewer
+through an evidence-first covenant review.
+
+Plan each turn from the user's request, current conversation, and latest tool
+result. Choose the next tool dynamically; do not follow a fixed scripted sequence.
+After a tool returns, decide whether another tool is justified or whether one
+clarifying question is required. Never call a tool merely to imitate activity.
+
+Use tools, do not guess:
+- List cases when the user asks what is available or has not identified a case.
+- Ingest a stored document when the user asks you to inspect an uploaded document.
+- Process an uploaded document only after checking its declared document kind.
+- Inspect current case state before describing progress or deciding the next tool.
+- Run or reevaluate a case when the user asks for its calculation or current result.
+- Never invent a clause, amount, formula, citation, status, or verdict.
+- Treat credit_agreement and amendment uploads as agreement documents, and
+  financial_statement uploads as financials. Do not ask the user to confirm an
+  equivalent document-kind spelling that the application already supplied.
+
+After each tool result, explain the result in plain language. For a calculation,
+show the ratio, comparator, threshold, material inputs, and source limits. If a
+required case id, document kind, period, or evidence item is missing, ask one short
+question for that missing item. Do not ask questions that a tool result already
+answers.
+
+Human decisions are a hard boundary. If a result is NEEDS_REVIEW, explain the exact
+blocker and ask the named reviewer to use the review card. Do not choose or submit a
+review decision. Do not approve a package. Continue only after persisted state shows
+that the human decision and deterministic recalculation completed.
+
+All outputs are draft preparation. Never call them legal advice, an e-signature, a
+signed certificate, or lender delivery. Do not reveal hidden reasoning. Keep answers
+concise and evidence based. Prefer short sections and lists. Avoid wide Markdown
+tables; the conversation panel is narrow.
 """
 
 
@@ -281,21 +309,9 @@ def build_agent_graph(workflow: CovenantWorkflow, *, checkpointer=None):
         return json.dumps(workflow.list_cases())
 
     @tool
-    def run_covenant_case(
-        case_id: str,
-        reviewer_decision: str = "pending",
-        reviewer_name: str | None = None,
-        reviewer_rationale: str | None = None,
-    ) -> str:
+    def run_covenant_case(case_id: str) -> str:
         """Run deterministic covenant arithmetic and the evidence review gate."""
-        result = workflow.run(
-            case_id,
-            RunRequest(
-                reviewer_decision=reviewer_decision,
-                reviewer_name=reviewer_name,
-                reviewer_rationale=reviewer_rationale,
-            ),
-        )
+        result = workflow.run(case_id, RunRequest())
         return result.model_dump_json(exclude={"trace": {"__all__": {"artifact_hash"}}})
 
     _ingest_impl = globals()["ingest_covenant_document"]
@@ -315,16 +331,50 @@ def build_agent_graph(workflow: CovenantWorkflow, *, checkpointer=None):
         return _ingest_impl(case_id, document_id, document_kind)
 
     @tool
-    def reevaluate_covenant_case(
-        case_id: str,
-        reviewer_decision: str = "pending",
-        reviewer_name: str | None = None,
-        reviewer_rationale: str | None = None,
-    ) -> str:
-        """Re-run deterministic covenant evaluation for a case after new input."""
-        return reevaluate_case(
-            workflow, case_id, reviewer_decision, reviewer_name, reviewer_rationale
-        )
+    def reevaluate_covenant_case(case_id: str) -> str:
+        """Re-run deterministic covenant evaluation after persisted input changes."""
+        return reevaluate_case(workflow, case_id)
+
+    @tool
+    def inspect_case_state(case_id: str) -> str:
+        """Read the authoritative persisted state for a private working case."""
+        import main as application
+
+        snapshot = application._active_revision_repository().snapshot(case_id)
+        return json.dumps(snapshot, default=str)
+
+    @tool
+    def process_uploaded_document(case_id: str, document_id: str) -> str:
+        """Queue durable analysis for one stored document in its current case.
+
+        This tool does not calculate or approve anything. The worker emits
+        persisted stage events and stops on missing evidence or human review.
+        """
+        import main as application
+
+        location = application._documents.find_location(document_id)
+        if str(location.get("case_id")) != case_id:
+            raise ValueError("document does not belong to this case")
+        head = application._active_revision_repository().current(case_id)
+        store = application.app.state.durability_runtime.job_store
+        try:
+            job = store.enqueue(
+                case_id,
+                head.revision_id,
+                {"document_id": document_id,
+                 "version": location.get("version_number"),
+                 "organization_id": location.get("organization_id")},
+            )
+        except Exception:
+            existing = [job for job in application._jobs_for_case(store, case_id)
+                        if job.revision_id == head.revision_id
+                        and job.state in ("queued", "running", "waiting_review")]
+            if not existing:
+                raise
+            job = existing[0]
+        return json.dumps({"case_id": case_id, "document_id": document_id,
+                           "revision_id": head.revision_id,
+                           "job_id": job.id, "status": job.state})
 
     model = ChatOpenAI(
         model=os.getenv("LITELLM_STRONG_ALIAS", "covenant-strong"),
@@ -335,7 +385,9 @@ def build_agent_graph(workflow: CovenantWorkflow, *, checkpointer=None):
     )
     return create_agent(
         model=model,
-        tools=[list_covenant_cases, run_covenant_case, ingest_covenant_document, reevaluate_covenant_case],
+        tools=[list_covenant_cases, inspect_case_state, ingest_covenant_document,
+               process_uploaded_document, run_covenant_case,
+               reevaluate_covenant_case],
         system_prompt=SYSTEM_PROMPT,
         checkpointer=checkpointer,
     )

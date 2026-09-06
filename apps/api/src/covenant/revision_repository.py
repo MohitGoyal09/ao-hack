@@ -35,7 +35,8 @@ class RevisionRepository(Protocol):
                     test_date: str, rule_id: str, threshold: Any,
                     doc_ids: list[str], fact_keys: list[str], *,
                     name: str | None = None, borrower_name: str | None = None,
-                    facility_name: str | None = None) -> CaseRevision: ...
+                    facility_name: str | None = None,
+                    seed_review_issue: bool = True) -> CaseRevision: ...
     def current(self, case_id: str) -> CaseRevision: ...
     def set_run_state(self, case_id: str, revision_id: str, state: str) -> None: ...
     def artifacts_for(self, case_id: str, revision_id: str) -> list[dict]: ...
@@ -44,7 +45,10 @@ class RevisionRepository(Protocol):
                         expected_parent: str, change_kind: str,
                         documents: list[str], facts: list[str],
                         new_threshold: Any | None = None,
+                        open_review_issue: bool = True,
                         ) -> tuple[CaseRevision, ChangeSet, ImpactSet]: ...
+    def open_review_issue(self, case_id: str, organization_id: str,
+                          revision_id: str, bundle_hash: str) -> None: ...
     def impact(self, case_id: str, revision_id: str) -> ImpactSet: ...
     def resolve_issue(self, issue_id: str, organization_id: str, user_id: str,
                       role: str, revision_id: str, expected_bundle_hash: str,
@@ -130,7 +134,8 @@ class MemoryRevisionRepository:
                     doc_ids: list[str], fact_keys: list[str], *,
                     name: str | None = None, borrower_name: str | None = None,
                     facility_name: str | None = None,
-                    template_case_id: str | None = None) -> CaseRevision:
+                    template_case_id: str | None = None,
+                    seed_review_issue: bool = True) -> CaseRevision:
         existing_org = self._case_org.get(case_id)
         if existing_org is not None and existing_org != organization_id:
             raise UnknownRevisionError(case_id)
@@ -147,6 +152,7 @@ class MemoryRevisionRepository:
             case_id=case_id, test_date=test_date, rule_id=rule_id,
             threshold=float(Decimal(str(threshold))),
             doc_ids=doc_ids, fact_keys=fact_keys,
+            seed_review_issue=seed_review_issue,
         )
         return rev
 
@@ -159,14 +165,20 @@ class MemoryRevisionRepository:
     def create_revision(self, case_id: str, organization_id: str, user_id: str,
                         expected_parent: str, change_kind: str,
                         documents: list[str], facts: list[str],
-                        new_threshold: Any | None = None) -> tuple[CaseRevision, ChangeSet, ImpactSet]:
+                        new_threshold: Any | None = None,
+                        open_review_issue: bool = True) -> tuple[CaseRevision, ChangeSet, ImpactSet]:
         self._require_case_org(case_id, organization_id)
         new_th = None if new_threshold is None else float(Decimal(str(new_threshold)))
         return self._store.create_revision(
             case_id=case_id, expected_parent=expected_parent,
             change_kind=change_kind, documents=documents, facts=facts,
-            new_threshold=new_th,
+            new_threshold=new_th, open_review_issue=open_review_issue,
         )
+
+    def open_review_issue(self, case_id: str, organization_id: str,
+                          revision_id: str, bundle_hash: str) -> None:
+        self._require_case_org(case_id, organization_id)
+        self._store.open_review_issue(case_id, revision_id, bundle_hash)
 
     def impact(self, case_id: str, revision_id: str) -> ImpactSet:
         return self._store.impact(case_id, revision_id)
@@ -199,6 +211,8 @@ class MemoryRevisionRepository:
                 fresh_comparator: str | None = None,
                 fresh_inputs: dict[str, str] | None = None) -> ApprovalBinding:
         self._require_case_org(case_id, organization_id)
+        calculation_current = self._calculation_is_current(case_id, revision_id) \
+            if decision == "approved" else False
         return self._store.approve(
             case_id=case_id, revision_id=revision_id, package_hash=package_hash,
             actor=user_id, role=role, decision=decision, reason=reason,  # type: ignore[arg-type]
@@ -206,7 +220,39 @@ class MemoryRevisionRepository:
             approved_comparator=approved_comparator, approved_inputs=approved_inputs,
             fresh_ratio=fresh_ratio, fresh_threshold=fresh_threshold,
             fresh_comparator=fresh_comparator, fresh_inputs=fresh_inputs,
+            calculation_current=calculation_current,
         )
+
+    def mark_package_ready(self, case_id: str, revision_id: str) -> str:
+        """Promote a recomputed draft to officer review (draft -> ready only)."""
+        try:
+            snap = self._store._snapshots[case_id][revision_id]  # noqa: SLF001
+        except KeyError as error:
+            raise UnknownRevisionError(revision_id) from error
+        if snap.get("package_state", "draft") == "draft":
+            snap["package_state"] = "ready_for_officer_review"
+        return str(snap["package_state"])
+
+    def _calculation_is_current(self, case_id: str, revision_id: str) -> bool:
+        """A current calculation artifact must postdate the latest decision."""
+        pipeline = self._pipeline
+        rows = []
+        if pipeline is not None:
+            rows = [a for a in pipeline.artifacts_for(case_id, revision_id)
+                    if a.get("artifact_type") == "calculation"]
+        if not rows:
+            return False
+        latest = self._store._issues.values()  # noqa: SLF001
+        decided = [i.resolved_at for i in latest
+                   if i.case_id == case_id and i.revision_id == revision_id
+                   and i.resolved_at is not None]
+        if not decided:
+            return True
+        newest = max(
+            decided if isinstance(decided[0], str)
+            else [d.isoformat() for d in decided])
+        stored = [str(a.get("stored_at") or "") for a in rows]
+        return any(s >= newest for s in stored if s)
 
     def snapshot(self, case_id: str) -> dict:
         snap = self._store.snapshot(case_id)
@@ -335,7 +381,8 @@ class PostgresRevisionRepository:
                     doc_ids: list[str], fact_keys: list[str], *,
                     name: str | None = None, borrower_name: str | None = None,
                     facility_name: str | None = None,
-                    template_case_id: str | None = None) -> CaseRevision:
+                    template_case_id: str | None = None,
+                    seed_review_issue: bool = True) -> CaseRevision:
         threshold_s = _money(threshold)
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -382,9 +429,11 @@ class PostgresRevisionRepository:
                     " calculation_hash, coverage_hash, package_hash,"
                     " run_state, package_state, threshold, rule_id, created_by)"
                     " values (%s, 'rev-1', %s, null, %s::date, %s, %s, %s, %s, %s,"
-                    " %s, 'waiting_review', 'draft', %s::numeric, %s, %s)",
+                    " %s, %s, 'draft', %s::numeric, %s, %s)",
                     (case_id, organization_id, test_date, bundle, rulebook,
-                     mapping, calc, coverage, package, threshold_s, rule_id,
+                     mapping, calc, coverage, package,
+                     "waiting_review" if seed_review_issue else "pending",
+                     threshold_s, rule_id,
                      user_id),
                 )
                 import json as _json
@@ -394,17 +443,18 @@ class PostgresRevisionRepository:
                     " values (%s, %s, 'rev-1', %s::jsonb, %s)"
                     " on conflict (case_id, revision_id) do nothing",
                     (organization_id, case_id,
-                     _json.dumps({"documents": list(doc_ids), "facts": list(fact_keys),
+                    _json.dumps({"documents": list(doc_ids), "facts": list(fact_keys),
                                   "threshold": threshold_s}), user_id),
                 )
-                cur.execute(
-                    "insert into public.review_issues"
-                    " (organization_id, case_id, revision_id, issue_kind, status,"
-                    " expected_bundle_hash, external_issue_id)"
-                    " values (%s, %s, 'rev-1', 'evidence_gap', 'open', %s, %s)"
-                    " on conflict do nothing",
-                    (organization_id, case_id, bundle, f"{case_id}-evidence-1"),
-                )
+                if seed_review_issue:
+                    cur.execute(
+                        "insert into public.review_issues"
+                        " (organization_id, case_id, revision_id, issue_kind, status,"
+                        " expected_bundle_hash, external_issue_id)"
+                        " values (%s, %s, 'rev-1', 'evidence_gap', 'open', %s, %s)"
+                        " on conflict do nothing",
+                        (organization_id, case_id, bundle, f"{case_id}-evidence-1"),
+                    )
                 seq = self._next_sequence(cur, case_id, organization_id)
                 cur.execute(
                     "insert into public.domain_events"
@@ -480,10 +530,25 @@ class PostgresRevisionRepository:
                     raise UnknownRevisionError(revision_id)
                 return self._rev_from_row(row)
 
+    def case_template(self, case_id: str) -> str | None:
+        """Catalog template a derived case was created from, if any."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select template_case_id from public.covenant_cases"
+                    " where id = %s",
+                    (case_id,),
+                )
+                row = cur.fetchone()
+                if row is None or row[0] is None:
+                    return None
+                return str(row[0])
+
     def create_revision(self, case_id: str, organization_id: str, user_id: str,
                         expected_parent: str, change_kind: str,
                         documents: list[str], facts: list[str],
                         new_threshold: Any | None = None,
+                        open_review_issue: bool = True,
                         ) -> tuple[CaseRevision, ChangeSet, ImpactSet]:
         import json as _json
         with self._connect() as conn:
@@ -608,14 +673,15 @@ class PostgresRevisionRepository:
                     " where case_id = %s and organization_id = %s and status = 'open'",
                     (case_id, organization_id),
                 )
-                cur.execute(
-                    "insert into public.review_issues"
-                    " (organization_id, case_id, revision_id, issue_kind, status,"
-                    " expected_bundle_hash, external_issue_id)"
-                    " values (%s, %s, %s, 'evidence_gap', 'open', %s, %s)",
-                    (organization_id, case_id, rev_id, bundle,
-                     f"{case_id}-{rev_id}-evidence-1"),
-                )
+                if open_review_issue:
+                    cur.execute(
+                        "insert into public.review_issues"
+                        " (organization_id, case_id, revision_id, issue_kind, status,"
+                        " expected_bundle_hash, external_issue_id)"
+                        " values (%s, %s, %s, 'evidence_gap', 'open', %s, %s)",
+                        (organization_id, case_id, rev_id, bundle,
+                         f"{case_id}-{rev_id}-evidence-1"),
+                    )
                 seq = self._next_sequence(cur, case_id, organization_id)
                 for name in ("INPUT_CHANGED", "RESULT_INVALIDATED"):
                     seq += 1 if name != "INPUT_CHANGED" else 0
@@ -652,6 +718,21 @@ class PostgresRevisionRepository:
                     review_requirements=(["officer-review"] if affected_rules else []),
                 )
                 return rev, changeset, impact
+
+    def open_review_issue(self, case_id: str, organization_id: str,
+                          revision_id: str, bundle_hash: str) -> None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "insert into public.review_issues"
+                    " (organization_id, case_id, revision_id, issue_kind, status,"
+                    " expected_bundle_hash, external_issue_id)"
+                    " values (%s, %s, %s, 'evidence_gap', 'open', %s, %s)"
+                    " on conflict do nothing",
+                    (organization_id, case_id, revision_id, bundle_hash,
+                     f"{case_id}-{revision_id}-evidence-1"),
+                )
+            conn.commit()
 
     def impact(self, case_id: str, revision_id: str) -> ImpactSet:
         with self._connect() as conn:
@@ -696,14 +777,25 @@ class PostgresRevisionRepository:
                       evidence_refs: list[str],
                       idempotency_key: str) -> dict:
         import json as _json
+
+        from .revisions import classify_decision_kind
+        # Unknown decision kinds never silently resolve or block (422 via
+        # ValueError) before any row is touched.
+        effect = classify_decision_kind(decision_kind)
         payload = {"issue_id": issue_id, "revision_id": revision_id,
                    "expected_bundle_hash": expected_bundle_hash,
                    "decision_kind": decision_kind, "rationale": rationale,
                    "evidence_refs": evidence_refs,
                    "actor": user_id, "role": role}
         request_hash = stable_hash(payload)
-        response = {"issue_id": issue_id, "revision_id": revision_id,
-                    "status": "resolved", "decision_kind": decision_kind}
+        if effect == "blocking":
+            response = {"issue_id": issue_id, "revision_id": revision_id,
+                        "status": "open", "blocking": True,
+                        "decision_kind": decision_kind}
+        else:
+            response = {"issue_id": issue_id, "revision_id": revision_id,
+                        "status": "resolved", "decision_kind": decision_kind,
+                        "recalculation": "queued"}
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -738,21 +830,36 @@ class PostgresRevisionRepository:
                     raise StaleCommandError("bundle hash no longer matches current state")
                 if not rationale:
                     raise ValueError("rationale is required")
-                cur.execute(
-                    "update public.review_issues set status = 'resolved',"
-                    " resolved_at = now(), resolved_by = %s,"
-                    " decision_kind = %s, rationale = %s, evidence_refs = %s::jsonb"
-                    " where id = %s",
-                    (user_id, decision_kind, rationale,
-                     _json.dumps(list(evidence_refs)), issue_uuid),
-                )
-                cur.execute(
-                    "update public.case_revisions set package_state = 'ready_for_officer_review'"
-                    " where case_id = %s and revision_id = %s and package_state = 'draft'"
-                    " and not exists (select 1 from public.review_issues"
-                    "   where case_id = %s and revision_id = %s and status = 'open')",
-                    (issue_case, revision_id, issue_case, revision_id),
-                )
+                if effect == "blocking":
+                    # request_document / mark_unresolved: the issue stays
+                    # open and blocking; the run remains paused.
+                    cur.execute(
+                        "update public.review_issues set"
+                        " resolved_at = now(), resolved_by = %s,"
+                        " decision_kind = %s, rationale = %s,"
+                        " evidence_refs = %s::jsonb where id = %s",
+                        (user_id, decision_kind, rationale,
+                         _json.dumps(list(evidence_refs)), issue_uuid),
+                    )
+                    event_type = "REVIEW_DECISION_RECORDED"
+                else:
+                    # Invalidating decisions resolve the issue but never mark
+                    # the package ready: the revision must be recomputed
+                    # (run_state -> queued) before readiness.
+                    cur.execute(
+                        "update public.review_issues set status = 'resolved',"
+                        " resolved_at = now(), resolved_by = %s,"
+                        " decision_kind = %s, rationale = %s, evidence_refs = %s::jsonb"
+                        " where id = %s",
+                        (user_id, decision_kind, rationale,
+                         _json.dumps(list(evidence_refs)), issue_uuid),
+                    )
+                    cur.execute(
+                        "update public.case_revisions set run_state = 'queued'"
+                        " where case_id = %s and revision_id = %s",
+                        (issue_case, revision_id),
+                    )
+                    event_type = "REVIEW_RESOLVED"
                 cur.execute(
                     "insert into public.review_decisions"
                     " (organization_id, issue_id, case_id, revision_id, actor_id,"
@@ -776,10 +883,21 @@ class PostgresRevisionRepository:
                     "insert into public.domain_events"
                     " (organization_id, case_id, revision_id, sequence,"
                     " event_type, redacted_summary)"
-                    " values (%s, %s, %s, %s, 'REVIEW_RESOLVED', %s::jsonb)",
+                    " values (%s, %s, %s, %s, %s, %s::jsonb)",
                     (organization_id, issue_case, revision_id, seq,
+                     event_type,
                      _json.dumps({"revision_id": revision_id})),
                 )
+                if effect != "blocking":
+                    cur.execute(
+                        "insert into public.domain_events"
+                        " (organization_id, case_id, revision_id, sequence,"
+                        " event_type, redacted_summary)"
+                        " values (%s, %s, %s, %s,"
+                        " 'RESULT_INVALIDATED', %s::jsonb)",
+                        (organization_id, issue_case, revision_id, seq + 1,
+                         _json.dumps({"revision_id": revision_id})),
+                    )
                 conn.commit()
                 return response
 
@@ -822,6 +940,53 @@ class PostgresRevisionRepository:
                     raise StaleCommandError("blocking review issues remain open")
                 if not reason:
                     raise ValueError("reason is required")
+                if decision == "approved":
+                    # The run must have completed a post-decision
+                    # recomputation: a waiting (or never-run) run, a package
+                    # that was never rechecked, or a stale/missing
+                    # calculation can never approve.
+                    cur.execute(
+                        "select run_state, package_state from public.case_revisions"
+                        " where case_id = %s and organization_id = %s"
+                        " and revision_id = %s",
+                        (case_id, organization_id, revision_id),
+                    )
+                    state_row = cur.fetchone()
+                    run_state = state_row[0] if state_row else None
+                    package_state = state_row[1] if state_row else None
+                    if run_state != "completed":
+                        raise StaleCommandError(
+                            f"revision {revision_id} has no completed run "
+                            f"(run_state={run_state!r});"
+                            " recalculation is required"
+                        )
+                    if package_state != "ready_for_officer_review":
+                        raise StaleCommandError(
+                            f"revision {revision_id} is not ready for officer"
+                            f" review (package_state={package_state!r})"
+                        )
+                    cur.execute(
+                        "select max(resolved_at) from public.review_issues"
+                        " where case_id = %s and organization_id = %s"
+                        " and revision_id = %s and status = 'resolved'",
+                        (case_id, organization_id, revision_id),
+                    )
+                    decided_at = cur.fetchone()[0]
+                    cur.execute(
+                        "select 1 from public.artifacts"
+                        " where organization_id = %s and case_id = %s"
+                        " and revision_id = %s and artifact_type = 'calculation'"
+                        " and state = 'current'"
+                        " and (%s is null or created_at >= %s)"
+                        " limit 1",
+                        (organization_id, case_id, revision_id,
+                         decided_at, decided_at),
+                    )
+                    if cur.fetchone() is None:
+                        raise StaleCommandError(
+                            f"revision {revision_id} has no current calculation"
+                            " artifact; recalculation is required"
+                        )
                 ratio = fresh_ratio if fresh_ratio is not None else approved_ratio
                 threshold = fresh_threshold if fresh_threshold is not None else approved_threshold
                 comparator = fresh_comparator if fresh_comparator is not None else approved_comparator

@@ -3,9 +3,35 @@ import unittest
 from fastapi.testclient import TestClient
 
 from main import app, revision_store
+from test_review_approval_safety import drain_recalculation_jobs
 
 REVIEWER = {"Authorization": "Bearer demo-user:treasury_reviewer:demo-org"}
 OFFICER = {"Authorization": "Bearer officer-1:officer:demo-org"}
+
+
+def _derive_case(client, template_case_id, headers, name):
+    """Mint a derived working case: catalog templates are read-only (G0.7)."""
+    created = client.post(
+        "/api/cases",
+        json={"template_case_id": template_case_id, "name": name},
+        headers=headers,
+    )
+    assert created.status_code == 200, created.text
+    case_id = created.json()["case_id"]
+    assert case_id != template_case_id, case_id
+    return case_id
+
+
+def _open_review_revision(client, case_id, headers, document="review-evidence"):
+    snap = client.get(f"/api/cases/{case_id}/snapshot", headers=headers).json()
+    revised = client.post(
+        f"/api/cases/{case_id}/revisions",
+        json={"expected_parent_revision": snap["revision"]["revision_id"],
+              "change_kind": "supporting_evidence", "documents": [document]},
+        headers=headers,
+    )
+    assert revised.status_code == 200, revised.text
+    return client.get(f"/api/cases/{case_id}/snapshot", headers=headers).json()
 
 
 class CovenantApiTests(unittest.TestCase):
@@ -45,7 +71,8 @@ class CovenantApiTests(unittest.TestCase):
         self.assertIn("/ag-ui", paths)
 
     def test_revision_flow_with_stale_rejection_and_idempotency(self):
-        case_id = "beacon-gross-leverage"
+        case_id = _derive_case(self.client, "beacon-gross-leverage", REVIEWER,
+                               "Revision flow probe")
         snap = self.client.get(f"/api/cases/{case_id}/snapshot", headers=REVIEWER)
         self.assertEqual(snap.status_code, 200)
         rev1 = snap.json()["revision"]["revision_id"]
@@ -108,7 +135,21 @@ class CovenantApiTests(unittest.TestCase):
                   "evidence_refs": [], "idempotency_key": "key-2"},
             headers=REVIEWER,
         )
-        self.assertEqual(stale_resolve.status_code, 409)
+        self.assertEqual(stale_resolve.status_code, 404)
+
+        # The resolve queued a durable recalculation; approval is rejected
+        # until it completes. Drive the offline worker, then approve.
+        early = self.client.post(
+            f"/api/cases/{case_id}/officer-approval",
+            json={"revision_id": rev2, "package_hash": "x",
+                  "decision": "approved", "reason": "too early"},
+            headers=OFFICER,
+        )
+        self.assertEqual(early.status_code, 409)
+        drain_recalculation_jobs()
+        ready = self.client.get(f"/api/cases/{case_id}/snapshot",
+                                headers=OFFICER).json()
+        self.assertEqual(ready["package_state"], "ready_for_officer_review")
 
         # Officer approval binds to the exact current package hash.
         snap3 = self.client.get(f"/api/cases/{case_id}/snapshot", headers=OFFICER)
@@ -146,7 +187,8 @@ class CovenantApiTests(unittest.TestCase):
 
 
     def test_run_uses_head_revision_threshold(self):
-        case_id = "beacon-gross-leverage"
+        case_id = _derive_case(self.client, "beacon-gross-leverage", REVIEWER,
+                               "Head threshold probe")
         snap = self.client.get(f"/api/cases/{case_id}/snapshot", headers=REVIEWER)
         head = snap.json()["revision"]["revision_id"]
         created = self.client.post(
@@ -163,10 +205,10 @@ class CovenantApiTests(unittest.TestCase):
         self.assertEqual(body["calculation"]["original_threshold"], "4.00")
         self.assertEqual(body["calculation"]["ratio"], "4.17")
         self.assertEqual(body["status"], "DRAFT_COMPLIANT")
-        # Documents accumulate across revisions; the original is never dropped.
+        # A private case starts without template evidence; only user-added
+        # documents accumulate across its revisions.
         docs = self.client.get(f"/api/cases/{case_id}/snapshot",
                                headers=REVIEWER).json()["documents"]
-        self.assertIn("beacon-original", docs)
         self.assertIn("amendment-4-50", docs)
 
     def test_officer_approval_locks_worker_calculation_when_present(self):
@@ -176,8 +218,9 @@ class CovenantApiTests(unittest.TestCase):
         from src.platform.storage import MemoryStorageAdapter
         from test_pipeline import FAKE_FACTS, FAKE_RULE, _job  # discovery: -s tests
 
-        case_id = "aon-term-loan-leverage"
-        snap = self.client.get(f"/api/cases/{case_id}/snapshot", headers=OFFICER).json()
+        case_id = _derive_case(self.client, "aon-term-loan-leverage", OFFICER,
+                               "Artifact approval probe")
+        snap = _open_review_revision(self.client, case_id, OFFICER)
         rev = snap["revision"]["revision_id"]
         pipeline = CasePipeline(None, MemoryStorageAdapter(),
                                 revision_repository=revision_store)
@@ -206,6 +249,30 @@ class CovenantApiTests(unittest.TestCase):
             headers=OFFICER,
         )
         self.assertEqual(resolve.status_code, 200, resolve.text)
+        # The worker's pre-decision artifacts are stale now: approval is
+        # rejected until the queued recalculation recomputes. Drain the
+        # queue with this test's pipeline (it holds the uploaded facts).
+        snap_mid = self.client.get(f"/api/cases/{case_id}/snapshot",
+                                   headers=OFFICER).json()
+        self.assertEqual(snap_mid["package_state"], "draft")
+        early = self.client.post(
+            f"/api/cases/{case_id}/officer-approval",
+            json={"revision_id": rev, "package_hash": snap_mid["package_hash"],
+                  "decision": "approved", "reason": "too early"},
+            headers=OFFICER,
+        )
+        self.assertEqual(early.status_code, 409, early.text)
+        from src.platform.worker import Worker
+
+        import main as _main
+
+        pipeline.case_provider = (  # noqa: SLF001
+            lambda cid: _main.workflow._repository.get_case(cid))
+        worker = Worker(_main.default_durability_runtime.job_store,
+                        pipeline, worker_id="artifact-approval-test")
+        for _ in range(25):
+            if worker.run_once() == "idle":
+                break
         self.assertEqual(self.client.get(f"/api/cases/{case_id}/snapshot",
                                          headers=OFFICER).json()["package_state"],
                          "ready_for_officer_review")
@@ -225,18 +292,13 @@ class CovenantApiTests(unittest.TestCase):
         self.assertFalse(after["approvals"][-1]["superseded"])
 
     def test_approval_locks_exact_numbers_and_supersedes(self):
-        case_id = "aurora-net-leverage"
-        snap = self.client.get(f"/api/cases/{case_id}/snapshot", headers=REVIEWER)
-        self.assertEqual(snap.status_code, 200)
-        rev1 = snap.json()["revision"]["revision_id"]
-        bundle = snap.json()["revision"]["input_bundle_hash"]
+        case_id = _derive_case(self.client, "aurora-net-leverage", REVIEWER,
+                               "Approval lock probe")
+        snap_body = _open_review_revision(self.client, case_id, REVIEWER)
+        rev1 = snap_body["revision"]["revision_id"]
+        bundle = snap_body["revision"]["input_bundle_hash"]
         # Resolve the seeded blocking issue so approval can proceed.
-        issue_id = f"{case_id}-evidence-1"
-        if "rev-1" not in rev1:
-            issue_id = f"{case_id}-{rev1}-evidence-1"
-        else:
-            # ensure_case may already exist from another test; resolve whatever is open.
-            pass
+        issue_id = snap_body["review_issues"][0]["issue_id"]
         resolve = self.client.post(
             f"/api/review-issues/{issue_id}/resolve",
             json={"revision_id": rev1, "expected_bundle_hash": bundle,
@@ -246,6 +308,9 @@ class CovenantApiTests(unittest.TestCase):
             headers=REVIEWER,
         )
         self.assertEqual(resolve.status_code, 200)
+
+        # Recalculation must finish before the numbers can lock.
+        drain_recalculation_jobs()
 
         snap2 = self.client.get(f"/api/cases/{case_id}/snapshot", headers=OFFICER)
         package_hash = snap2.json()["package_hash"]

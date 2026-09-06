@@ -95,6 +95,24 @@ class RevisionAuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_officer_approval_binds_server_identity(self) -> None:
+        # Catalog templates are read-only: bind identity on a derived case.
+        created = self.client.post(
+            "/api/cases",
+            json={"template_case_id": self.case_id,
+                   "name": "Identity binding probe"},
+            headers=OFFICER,
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        self.case_id = created.json()["case_id"]
+        initial = self._snapshot(OFFICER).json()
+        revised = self.client.post(
+            f"/api/cases/{self.case_id}/revisions",
+            json={"expected_parent_revision": initial["revision"]["revision_id"],
+                  "change_kind": "supporting_evidence",
+                  "documents": ["identity-review-evidence"]},
+            headers=OFFICER,
+        )
+        self.assertEqual(revised.status_code, 200, revised.text)
         snap = self._snapshot(OFFICER)
         self.assertEqual(snap.status_code, 200)
         rev = snap.json()["revision"]["revision_id"]
@@ -112,6 +130,10 @@ class RevisionAuthTests(unittest.TestCase):
             headers=OFFICER,
         )
         self.assertEqual(resolve.status_code, 200)
+        # Approval needs the post-decision recomputation, not the resolve.
+        from test_review_approval_safety import drain_recalculation_jobs
+
+        drain_recalculation_jobs()
         approval = self.client.post(
             f"/api/cases/{self.case_id}/officer-approval",
             json={"revision_id": rev, "package_hash": package,

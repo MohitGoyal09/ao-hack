@@ -24,6 +24,31 @@ def _ids(prefix: str) -> tuple[str, str, str]:
     return org, user, f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
+def _post_recalculation_state(repo: MemoryRevisionRepository, case: str,
+                              revision_id: str = "rev-1") -> None:
+    """Simulate a completed post-decision recomputation for repo tests.
+
+    Binds a stub pipeline exposing a current calculation artifact, marks
+    the run completed and the package ready -- the state the worker-driven
+    recalculation produces. These tests assert persistence semantics, not
+    the pipeline itself.
+    """
+    from datetime import datetime, timezone
+
+    class _StubPipeline:
+        def artifacts_for(self, case_id: str, rev: str) -> list[dict]:
+            if case_id == case and rev == revision_id:
+                return [{"artifact_type": "calculation",
+                         "content_hash": "0" * 64,
+                         "stored_at": datetime.now(timezone.utc).isoformat(),
+                         "payload": {}}]
+            return []
+
+    repo._pipeline = _StubPipeline()  # noqa: SLF001
+    repo.set_run_state(case, revision_id, "completed")
+    repo.mark_package_ready(case, revision_id)
+
+
 def _provision_org_case(cur, org: str, user: str, case_id: str,
                         role: str = "treasury_reviewer") -> None:
     cur.execute(
@@ -53,6 +78,9 @@ class MemoryRepositoryTests(unittest.TestCase):
         repo.resolve_issue(f"{case}-evidence-1", org, user, "treasury_reviewer",
                            head.revision_id, head.input_bundle_hash,
                            "accept_evidence", "verified", ["doc:doc-1"], "k-1")
+        snap = repo.snapshot(case)
+        # Approval needs the post-decision recomputation, not the resolve.
+        _post_recalculation_state(repo, case, head.revision_id)
         snap = repo.snapshot(case)
         repo.approve(case, org, user, "officer", head.revision_id,
                      snap["package_hash"], "approved", "ok",
@@ -135,14 +163,20 @@ class MemoryRepositoryTests(unittest.TestCase):
                            snap["revision"]["input_bundle_hash"], "accept_evidence",
                            "verified", ["doc:doc-1"], "k-1")
         snap = repo.snapshot(case)
-        self.assertEqual(snap["run_state"], "running")  # not derived from issues
-        self.assertEqual(snap["package_state"], "ready_for_officer_review")
+        # The resolve invalidates outputs and queues recomputation instead
+        # of marking the package ready.
+        self.assertEqual(snap["run_state"], "queued")
+        self.assertEqual(snap["package_state"], "draft")
         resolved = snap["review_issues"][0]
         self.assertEqual(resolved["status"], "resolved")
         self.assertEqual(resolved["decision_kind"], "accept_evidence")
         self.assertEqual(resolved["rationale"], "verified")
         self.assertEqual(resolved["resolved_by"], user)
         self.assertTrue(resolved["resolved_at"])
+        _post_recalculation_state(repo, case, "rev-1")
+        snap = repo.snapshot(case)
+        self.assertEqual(snap["run_state"], "completed")
+        self.assertEqual(snap["package_state"], "ready_for_officer_review")
         repo.approve(case, org, user, "officer", "rev-1", snap["package_hash"],
                      "approved", "ok", fresh_ratio="4.17", fresh_threshold="4.00",
                      fresh_comparator="<=", fresh_inputs={"f1": "1.00"})
@@ -214,6 +248,26 @@ class PostgresRevisionRepositoryTests(unittest.TestCase):
                                 "4.00", ["doc-1"], ["f1"])
         return org, user, officer, case, head
 
+    def _post_recalculation_state_pg(self, org: str, case: str, rev: str) -> None:
+        """Completed post-decision recomputation state for Postgres tests."""
+        import psycopg
+        with psycopg.connect(self.dsn, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "update public.case_revisions"
+                    " set run_state = 'completed',"
+                    " package_state = 'ready_for_officer_review'"
+                    " where case_id = %s and revision_id = %s",
+                    (case, rev),
+                )
+                cur.execute(
+                    "insert into public.artifacts"
+                    " (organization_id, case_id, revision_id, artifact_type,"
+                    " content_hash, payload, state)"
+                    " values (%s, %s, %s, 'calculation', %s, %s::jsonb, 'current')",
+                    (org, case, rev, "0" * 64, '{"ratio": "4.17"}'),
+                )
+
     def test_revision_history_survives_reconstruction(self) -> None:
         repo = self._repo()
         org, user, officer, case, head = self._setup_case(repo)
@@ -246,6 +300,7 @@ class PostgresRevisionRepositoryTests(unittest.TestCase):
         repo.resolve_issue(f"{case}-evidence-1", org, officer, "officer",
                            head.revision_id, head.input_bundle_hash,
                            "accept_evidence", "verified", ["doc:doc-1"], "rk-2")
+        self._post_recalculation_state_pg(org, case, head.revision_id)
         snap = repo.snapshot(case)
         repo.approve(case, org, officer, "officer", head.revision_id,
                      snap["package_hash"], "approved", "reviewed",
@@ -282,6 +337,7 @@ class PostgresRevisionRepositoryTests(unittest.TestCase):
         repo.resolve_issue(f"{case}-evidence-1", org, officer, "officer",
                            head.revision_id, head.input_bundle_hash,
                            "accept_evidence", "verified", ["doc:doc-1"], "rk-3")
+        self._post_recalculation_state_pg(org, case, head.revision_id)
         snap = repo.snapshot(case)
         repo.approve(case, org, officer, "officer", head.revision_id,
                      snap["package_hash"], "approved", "reviewed",
