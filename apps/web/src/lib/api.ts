@@ -62,12 +62,20 @@ const listeners = new Set<() => void>();
 let cached: Identity | null = null;
 export function getOfflineIdentity(): Identity {
   if (cached) return cached;
-  try { cached = JSON.parse(localStorage.getItem(KEY) ?? "") as Identity; } catch { cached = DEFAULT_IDENTITY; }
-  return cached;
+  if (typeof window === "undefined") return DEFAULT_IDENTITY;
+  try {
+    const raw = localStorage.getItem(KEY);
+    cached = raw ? (JSON.parse(raw) as Identity) : DEFAULT_IDENTITY;
+  } catch {
+    cached = DEFAULT_IDENTITY;
+  }
+  return cached ?? DEFAULT_IDENTITY;
 }
 export function setOfflineIdentity(identity: Identity) {
   cached = identity;
-  try { localStorage.setItem(KEY, JSON.stringify(identity)); } catch { /* private mode */ }
+  if (typeof window !== "undefined") {
+    try { localStorage.setItem(KEY, JSON.stringify(identity)); } catch { /* private mode */ }
+  }
   listeners.forEach((listener) => listener());
 }
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };

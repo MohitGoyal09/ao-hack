@@ -37,3 +37,21 @@ button { -webkit-tap-highlight-color: transparent; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; scroll-behavior: auto !important; transition: none !important; }
 }
+
+/* Suppress CopilotKit inspector / dev-console floating elements */
+.copilotkit-dev-console,
+[class*="copilotkit-dev"],
+[data-copilotkit-dev-console],
+[class*="CopilotDevConsole"],
+[class*="copilotkit-inspector"] {
+  display: none !important;
+}
+
+/* Suppress Next.js bottom-left dev indicator overlay */
+nextjs-portal,
+[data-nextjs-toast],
+[data-nextjs-dev-tools] {
+  display: none !important;
+}
+
+

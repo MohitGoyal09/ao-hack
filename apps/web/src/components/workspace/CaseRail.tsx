@@ -22,7 +22,7 @@ export function CaseRail({ templates, templatesError, myCases, activeId, openIss
   const identity = useIdentity();
   const { run, busy, error } = useAction();
   const [query, setQuery] = useState("");
-  const [newCaseOpen, setNewCaseOpen] = useState(false);
+  const [newCaseOpen, setNewCaseOpen] = useState(true);
   const mutate = canMutate(identity.role);
 
   const q = query.trim().toLowerCase();

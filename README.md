@@ -1,10 +1,104 @@
-# Covenant Certificate
+<div align="center">
+  <img src="landing_page/public/logo.png" alt="Covenant Certificate Logo" width="220" />
+  <h1>Covenant Certificate</h1>
+  <p><strong>Evidence-first loan covenant compliance workflow for borrower-side treasury teams</strong></p>
+  <p><em>Track 2 — Autonomous Office of the CFO · Syndicate by Maximor</em></p>
+  <p>
+    <a href="#what-the-demo-shows">Demo Walkthrough</a> •
+    <a href="#architecture">Architecture</a> •
+    <a href="#run-locally">Run Locally</a> •
+    <a href="#api">API Reference</a> •
+    <a href="#evaluation--measurable-results">Evaluation</a>
+  </p>
+</div>
 
-**Track 2 — Autonomous Office of the CFO** entry for Syndicate by Maximor.
+---
 
-Borrower-side treasury teams prepare loan-covenant compliance certificates by hand: the credit agreement's own definitions decide what counts as debt and EBITDA, the measurement period has to match, amendments change thresholds mid-life, and an authorized officer signs. Getting it wrong is an event of default. Covenant Certificate automates that workflow end to end — upload the agreement and financials, extract and cite the covenant rule, calculate deterministically, stop for human review whenever evidence is missing or a period does not match, re-run when an amendment lands, and let an officer approve the exact locked numbers — while never letting the model be the authority on a number or a verdict. It produces an officer-reviewed *draft*, not legal advice and never a signed certificate.
+Borrower-side treasury teams prepare loan-covenant compliance certificates by hand: the credit agreement's own definitions decide what counts as debt and EBITDA, the measurement period has to match, amendments change thresholds mid-life, and an authorized officer signs. Getting it wrong is an event of default. **Covenant Certificate** automates that workflow end to end — upload the agreement and financials, extract and cite the covenant rule, calculate deterministically, stop for human review whenever evidence is missing or a period does not match, re-run when an amendment lands, and let an officer approve the exact locked numbers — while never letting the model be the authority on a number or a verdict. It produces an officer-reviewed *draft*, not legal advice and never a signed certificate.
 
 New engineers and coding agents: start at [`docs/agent-handoff.md`](docs/agent-handoff.md), then [`docs/implementation-contract.md`](docs/implementation-contract.md). Current code overrides both.
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Client ["🖥️ Client Layer (Next.js 16 + React 19 + CopilotKit)"]
+        direction TB
+        Landing["Landing Page (/)<br/>• Prepared Starters<br/>• 1-Click Case Creation"]
+        Workbench["Workbench (/cases/:id)<br/>• Live Event Feed<br/>• Copilot Chat over AG-UI<br/>• Review Inbox & Revision Panel"]
+        Workpaper["Printable Workpaper (/cases/:id/workpaper)<br/>• Audit DRAFT Watermark<br/>• Locked Formula & Citations"]
+        Proxy["Next.js Same-Origin Proxy<br/>/api/covenant/* & /api/copilotkit/*"]
+        
+        Landing --> Proxy
+        Workbench --> Proxy
+        Workpaper --> Proxy
+    end
+
+    subgraph Gateway ["⚡ API Gateway & Agent Runtime (FastAPI :8123)"]
+        direction TB
+        FastAPI["FastAPI Gateway (main.py)<br/>• REST Routes & Auth Validation<br/>• Readiness & Durability Health Gate"]
+        AGUI["AG-UI Protocol Endpoint (/ag-ui)"]
+        Agent["4-Tool LangGraph Copilot Agent (src/agent.py)<br/>• Proposes tools & inspects readiness<br/>• Dispatches by keyword or LLM"]
+        
+        Proxy --> FastAPI
+        Proxy --> AGUI
+        AGUI --> Agent
+    end
+
+    subgraph Core ["⚙️ Covenant Core Engine (Deterministic Python)"]
+        direction TB
+        subgraph Pipeline ["9-Node LangGraph Covenant Workflow"]
+            N1["1. Resolve Documents"] --> N2["2. Compile Definitions & Clauses"]
+            N2 --> N3["3. Map Financial Evidence"]
+            N3 --> N4["4. Typed Decimal Calculator<br/>(Exact arithmetic · No eval · Zero hallucination)"]
+            N4 --> N5{"5. Fail-Closed Policy Engine"}
+            N5 -- "Period Mismatch or Missing Proof" --> N6["6. Human Review Pause<br/>(NEEDS_REVIEW · Requires reason)"]
+            N5 -- "Evidence & Period Verified" --> N7["7. Assemble Evidence Manifest"]
+            N6 -. "Controller Decision Recorded" .-> N7
+            N7 --> N8["8. Render Draft Package"]
+            N8 --> N9["9. Finalize Head Revision & Package Hash"]
+        end
+        
+        FastAPI --> Pipeline
+        Agent -. "Calls authorized case tools" .-> Pipeline
+    end
+
+    subgraph Durability ["🔒 Durability & Storage Layer"]
+        direction TB
+        Postgres[("Supabase / PostgreSQL<br/>• Revisions & Checkpoints<br/>• Fenced Job Queue<br/>• Durable Domain Events")]
+        Storage[("Private Object Storage<br/>• Immutable Hashed Documents<br/>• SHA-256 Identification")]
+        Worker[["Background Job Worker<br/>(python -m src.platform.worker)<br/>• Leases with Fencing Tokens<br/>• Heartbeat Monitoring")]
+        
+        Pipeline <--> Postgres
+        Pipeline <--> Storage
+        Worker -. "Polls & executes jobs" .-> Pipeline
+    end
+
+    subgraph Governance ["🛡️ Human Governance & Officer Boundary"]
+        direction TB
+        ApprovalGate["Officer Approval Gateway<br/>• Binds Officer Identity + Revision<br/>• Verifies Immutable Package Hash<br/>• Rejects Superseded Revisions (409)"]
+        AuditPackage["Locked Draft Package (JSON / PDF Workpaper)<br/>• Unalterable Calculation<br/>• Page-Level Agreement Citations<br/>• Never Electronic Signature / Not Legal Advice"]
+        
+        N9 --> ApprovalGate
+        ApprovalGate --> AuditPackage
+    end
+
+    classDef client fill:#f9f9fb,stroke:#4f46e5,stroke-width:1.5px,color:#111;
+    classDef gateway fill:#f0fdf4,stroke:#16a34a,stroke-width:1.5px,color:#111;
+    classDef core fill:#eff6ff,stroke:#2563eb,stroke-width:1.5px,color:#111;
+    classDef storage fill:#fffbeb,stroke:#d97706,stroke-width:1.5px,color:#111;
+    classDef gov fill:#fdf2f8,stroke:#db2777,stroke-width:1.5px,color:#111;
+
+    class Landing,Workbench,Workpaper,Proxy client;
+    class FastAPI,AGUI,Agent gateway;
+    N1,N2,N3,N4,N5,N6,N7,N8,N9 core;
+    class Postgres,Storage,Worker storage;
+    class ApprovalGate,AuditPackage gov;
+```
+
+**Control boundary.** The calculation code contains no `eval`, no model-generated code execution and no LLM-issued verdict. The model may propose structured facts and rules and call typed tools; a human reviewer resolves evidence; typed Python calculates; an officer approves. Missing or unclear evidence never becomes zero and never becomes a pass. A leverage pass is never presented as full agreement compliance.
+
+**Durability.** Configured Postgres that cannot be verified fails readiness (`/health/ready` 503) and blocks business traffic — it never silently falls back to memory. Memory mode is explicit and only used when no `DATABASE_URL` is set.
 
 ## What the demo shows
 
@@ -21,41 +115,6 @@ Two supporting views, both labelled on screen:
 - **Two-agreement comparison — hypothetical.** Aurora (net leverage, pass) and Beacon (gross leverage, breach) are synthetic agreements applied to one financial packet. Same numbers, different definitions, opposite result. This is not a claim about any issuer's compliance.
 - **Aon term-loan case — extraction only.** The Aon covenant is extracted from a real SEC exhibit and the facts from a real Form 10-K, but the fiscal-2023 financials predate the agreement's first measurement period. The policy layer detects the period mismatch and returns `NEEDS_REVIEW` with a specific missing-period request, not a compliance verdict.
 
-## Architecture
-
-```text
- Browser (Next.js + CopilotKit)
-   / landing: start a case from a template, your cases; CopilotChat over AG-UI
-   /cases/[id] workbench: sign-in, upload, job timeline, live event feed,
-   review inbox, revisions/impact, officer approval, download
-   /cases/[id]/workpaper: printable DRAFT workpaper (browser print to PDF)
-        |  same-origin proxy forwards Authorization + multipart
-        v
- FastAPI (apps/api/main.py)
-   REST routes below  ·  /ag-ui (AG-UI over LangGraph)  ·  /health/*
-        |                      |
-        |                      +-- 4-tool LangGraph agent (src/agent.py)
-        |                          list / run / ingest(document_id) / reevaluate
-        |                          model proposes and calls tools; never calculates
-        v
- Covenant core (apps/api/src/covenant/)
-   9-node LangGraph: resolve_documents -> compile_rule -> map_evidence
-     -> calculate -> apply_policy -> [record_review] -> assemble_evidence
-     -> render_certificate -> finalize
-   typed Decimal calculator, fail-closed policy, hash-chained trace,
-   revisions/impact/approval, immutable document intake, pipeline
-        |
-        v
- Durability (apps/api/src/platform/)             Worker
-   Postgres on Supabase: revisions, jobs,   <--  python -m src.platform.worker
-   documents, artifacts, events, LangGraph        lease -> heartbeat -> run
-   checkpoints; private Storage bucket;           -> fenced publish
-   Supabase Auth; explicit in-memory offline mode
-```
-
-**Control boundary.** The calculation code contains no `eval`, no model-generated code execution and no LLM-issued verdict. The model may propose structured facts and rules and call typed tools; a human reviewer resolves evidence; typed Python calculates; an officer approves. Missing or unclear evidence never becomes zero and never becomes a pass. A leverage pass is never presented as full agreement compliance.
-
-**Durability.** Configured Postgres that cannot be verified fails readiness (`/health/ready` 503) and blocks business traffic — it never silently falls back to memory. Memory mode is explicit and only used when no `DATABASE_URL` is set.
 
 ## Model provider
 
