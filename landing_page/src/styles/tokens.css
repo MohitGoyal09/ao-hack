@@ -10,8 +10,8 @@
   --green-dark: #092c25;
   --green-mid: #0fb6ac;
   --green-pale: #8ed3cc;
-  --rule: rgba(36, 34, 24, 0.14);
-  --rule-soft: rgba(36, 34, 24, 0.07);
+  --rule: rgba(18, 17, 12, 0.26);
+  --rule-soft: rgba(18, 17, 12, 0.16);
 
   /* —— impeccable typography —— */
   --font-display: 'Alumni Sans', 'Albert Sans', Arial, sans-serif;

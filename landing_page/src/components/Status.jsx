@@ -42,27 +42,35 @@ export default function Status() {
           viewport={{ once: true, margin: '-80px' }}
           transition={{ duration: 0.6, ease: [0.2, 0.8, 0.2, 1] }}
         >
-          <span className="eyebrow">Shipped</span>
+          <div className="status-card-header">
+            <span className="status-pill status-pill-shipped">
+              <span className="status-pill-dot live" />
+              Shipped
+            </span>
+            <span className="status-count-tag mono">7 / 7 Verified</span>
+          </div>
           <ul className="status-list">
             {shipped.map((t) => (
               <li key={t}>
-                <svg
-                  className="status-ok"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M2.5 8.5l3.5 3.5 7.5-8"
-                    stroke="currentColor"
-                    strokeWidth="2.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                {t}
+                <span className="status-icon-wrap status-icon-ok">
+                  <svg
+                    className="status-ok"
+                    width="12"
+                    height="12"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M2.5 8.5l3.5 3.5 7.5-8"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+                <span className="status-item-text">{t}</span>
               </li>
             ))}
           </ul>
@@ -75,14 +83,20 @@ export default function Status() {
           viewport={{ once: true, margin: '-80px' }}
           transition={{ duration: 0.6, ease: [0.2, 0.8, 0.2, 1], delay: 0.12 }}
         >
-          <span className="eyebrow">On deck</span>
+          <div className="status-card-header">
+            <span className="status-pill status-pill-ondeck">
+              <span className="status-pill-dot pulse" />
+              On deck
+            </span>
+            <span className="status-count-tag mono">Roadmap Targets</span>
+          </div>
           <ul className="status-list">
             {onDeck.map((t) => (
               <li key={t}>
-                <span className="status-wait" aria-hidden="true">
-                  ●
+                <span className="status-icon-wrap status-icon-wait">
+                  <span className="status-wait-dot" aria-hidden="true" />
                 </span>
-                {t}
+                <span className="status-item-text">{t}</span>
               </li>
             ))}
           </ul>

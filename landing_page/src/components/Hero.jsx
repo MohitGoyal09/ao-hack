@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import RuxScene from '../three/RuxCore'
+import DarkCluster from '../three/DarkCluster'
 
 const container = {
   hidden: {},
@@ -68,7 +68,22 @@ export default function Hero() {
           animate={{ opacity: 1, scale: 1, y: 0 }}
           transition={{ duration: 1.1, ease: [0.2, 0.8, 0.2, 1], delay: 0.25 }}
         >
-          <RuxScene />
+          <div className="hero-scene" aria-hidden="true">
+            <div className="scene-glow" />
+            <DarkCluster
+              background="#f7f5ec"
+              baseColor="#0e5b56"
+              accentColor="#0fb6ac"
+              shadowColor="#092c25"
+              density={2}
+              shardSize={114}
+              speed={46}
+              distance={2.75}
+              cluster={{ extrusion: 100, spin: 26 }}
+              hover={{ reach: 115, lift: 70 }}
+              render={{ outline: 85, dither: 0 }}
+            />
+          </div>
         </motion.div>
       </div>
 
