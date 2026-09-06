@@ -75,6 +75,18 @@ class IntakeApiTests(unittest.TestCase):
         for forbidden in ("data", "bytes", "content", "file_bytes"):
             self.assertNotIn(forbidden, meta_body)
 
+        content = self.client.get(
+            f"/api/documents/{body['document_id']}/content",
+            headers=REVIEWER,
+        )
+        self.assertEqual(content.status_code, 200, content.text)
+        self.assertEqual(content.content, PDF_BYTES)
+        self.assertEqual(content.headers["content-type"], "application/pdf")
+        self.assertIn("inline", content.headers["content-disposition"])
+        self.assertEqual(content.headers["cache-control"], "private, no-store")
+        self.assertEqual(content.headers["x-content-type-options"], "nosniff")
+        self.assertIn("sandbox", content.headers["content-security-policy"])
+
     def test_second_upload_with_document_id_bumps_version(self) -> None:
         document_id = f"intake-doc-{uuid.uuid4().hex[:8]}"
         first = _upload(self.client, self.case_id, REVIEWER, document_id=document_id)
@@ -123,6 +135,12 @@ class IntakeApiTests(unittest.TestCase):
                                        headers=OUTSIDER)
         self.assertEqual(outsider_get.status_code, 404)
         self.assertNotIn("demo-org", outsider_get.text)
+
+        outsider_content = self.client.get(
+            f"/api/documents/{document_id}/content", headers=OUTSIDER
+        )
+        self.assertEqual(outsider_content.status_code, 404)
+        self.assertNotIn("demo-org", outsider_content.text)
 
     def test_viewer_upload_is_forbidden(self) -> None:
         prime = self.client.get(f"/api/cases/{self.case_id}/snapshot", headers=REVIEWER)

@@ -25,7 +25,7 @@ from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 from copilotkit import LangGraphAGUIAgent
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from src.agent import build_agent_graph
@@ -995,6 +995,44 @@ async def get_document(
         "case_id": case_id,
         "organization_id": org_id,
     }
+
+
+@app.get("/api/documents/{document_id}/content")
+async def get_document_content(
+    document_id: str,
+    request: Request,
+    principal: Principal = Depends(require_revision_principal),
+) -> Response:
+    """Stream the latest authorized document version for an inline preview."""
+    if _documents is None:
+        raise HTTPException(status_code=503, detail="Document intake is unavailable")
+    authorization = request.headers.get("authorization")
+    repo = _active_revision_repository()
+    try:
+        loc = _documents.find_location(document_id)
+    except (LookupError, ValueError) as error:
+        raise HTTPException(status_code=404, detail="Unknown document") from error
+    case_id, org_id, meta = _parse_document_location(loc)
+    if not case_id or not org_id:
+        raise HTTPException(status_code=404, detail="Unknown document")
+    if _offline_member_role(repo, org_id, principal, authorization) is None:
+        raise HTTPException(status_code=404, detail="Unknown document")
+    try:
+        version, content = _documents.read_bytes(document_id, org_id)
+    except (LookupError, ValueError) as error:
+        raise HTTPException(status_code=404, detail="Unknown document") from error
+    title = str((meta or {}).get("title") or version.title or "document.pdf")
+    safe_title = re.sub(r'[^A-Za-z0-9._ -]', '_', title).strip() or "document.pdf"
+    return Response(
+        content=content,
+        media_type=version.media_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{safe_title}"',
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+            "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+        },
+    )
 
 
 # --- Job list/cancel routes (additive; existing routes/helpers untouched). ---

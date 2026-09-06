@@ -12,8 +12,8 @@ const toolLabel: Record<ToolState, string> = {
   queued: "Queued",
 };
 
-export function ToolCard({ title, state, summary, input, output }: { title: string; state: ToolState; summary: string; input?: ReactNode; output?: ReactNode }) {
-  return <details className={s.tool} open={state === "running" || state === "error"}>
+export function ToolCard({ id, title, state, summary, input, output }: { id?: string; title: string; state: ToolState; summary: string; input?: ReactNode; output?: ReactNode }) {
+  return <details id={id} className={s.tool} open={state === "running" || state === "error"}>
     <summary>
       <span className={`${s.dot} ${s[`dot${state[0].toUpperCase()}${state.slice(1)}`]}`} aria-hidden="true" />
       <span className={s.toolTitle}>{title}</span>

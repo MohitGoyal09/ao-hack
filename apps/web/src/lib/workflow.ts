@@ -90,6 +90,7 @@ export function deriveStages(snapshot: Snapshot | null, events: EventLike[]): St
     else if (failed) { s.state = "failed"; s.detail = "Run failed before the agreement was resolved."; s.action = "Check the run error and retry."; }
     else if (runningStage === "agreement" && docs > 0) { s.state = "running"; s.detail = "Resolving the controlling document chain."; s.action = "Wait for extraction."; }
     else if (open > 0) { s.state = "blocked"; s.detail = `${open} open review issue(s) block agreement resolution.`; s.action = "Resolve the review interrupt in the conversation."; }
+    else if (docs > 0) { s.detail = "The agreement is registered but analysis has not started."; s.action = "Attach the remaining required documents, then ask the agent to continue."; }
     else { s.detail = "No extracted rulebook yet."; s.action = "Upload a credit agreement to extract definitions."; }
     out.push(s);
   }
@@ -122,7 +123,7 @@ export function deriveStages(snapshot: Snapshot | null, events: EventLike[]): St
     else if (failed) { s.state = "failed"; s.detail = "Calculation failed."; s.action = "Check the run error and retry."; }
     else if (runningStage === "calculation") { s.state = "running"; s.detail = "Deterministic calculator is running."; s.action = "Wait for the ratio."; }
     else if (open > 0) { s.state = "blocked"; s.detail = "Missing evidence blocks calculation."; s.action = "Resolve the review interrupt."; }
-    else { s.detail = "No calculation yet for this revision."; s.action = "Press Recalculate on the workbench card."; }
+    else { s.detail = "No calculation yet for this revision."; s.action = "Ask the agent to continue after the required documents are attached."; }
     out.push(s);
   }
   // 6 Controller review

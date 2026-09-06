@@ -37,14 +37,21 @@ clarifying question is required. Never call a tool merely to imitate activity.
 
 Use tools, do not guess:
 - List cases when the user asks what is available or has not identified a case.
-- Ingest a stored document when the user asks you to inspect an uploaded document.
 - Process an uploaded document only after checking its declared document kind.
 - Inspect current case state before describing progress or deciding the next tool.
-- Run or reevaluate a case when the user asks for its calculation or current result.
 - Never invent a clause, amount, formula, citation, status, or verdict.
 - Treat credit_agreement and amendment uploads as agreement documents, and
   financial_statement uploads as financials. Do not ask the user to confirm an
   equivalent document-kind spelling that the application already supplied.
+- Do not queue full processing when the conversation contains an agreement but
+  no financial statement. Ingest/explain the agreement and ask for financials.
+- When the same case thread contains both an agreement and financial statement,
+  queue `process_uploaded_document` for the newest relevant document.
+- On the first case inspection, give one complete document checklist. Always
+  require the governing credit agreement and period-matched financial statement.
+  List amendments, debt/cash schedules, add-back support, waivers and certificate
+  form as conditional items only when relevant. Do not ask for one file at a time
+  when several known requirements are missing.
 
 After each tool result, explain the result in plain language. For a calculation,
 show the ratio, comparator, threshold, material inputs, and source limits. If a
@@ -62,6 +69,11 @@ signed certificate, or lender delivery. Do not reveal hidden reasoning. Keep ans
 concise and evidence based. Prefer short sections and lists. Avoid wide Markdown
 tables; the conversation panel is narrow.
 """
+
+
+def missing_required_document_roles(roles: set[str]) -> list[str]:
+    """Return the minimum evidence roles required before pipeline execution."""
+    return [role for role in ("credit_agreement", "financial_statement") if role not in roles]
 
 
 def ingest_covenant_document(case_id: str, document_id: str, document_kind: str) -> str:
@@ -337,10 +349,31 @@ def build_agent_graph(workflow: CovenantWorkflow, *, checkpointer=None):
 
     @tool
     def inspect_case_state(case_id: str) -> str:
-        """Read the authoritative persisted state for a private working case."""
+        """Read persisted case state plus a safe required-document checklist."""
         import main as application
 
         snapshot = application._active_revision_repository().snapshot(case_id)
+        documents = []
+        for document_id in snapshot.get("documents", []):
+            location = application._documents.find_location(document_id)
+            documents.append({
+                "document_id": document_id,
+                "document_role": location.get("document_role"),
+                "media_type": location.get("media_type"),
+            })
+        present_roles = {str(item["document_role"]) for item in documents}
+        required = ["credit_agreement", "financial_statement"]
+        snapshot["document_requirements"] = {
+            "present": documents,
+            "missing_required": [role for role in required if role not in present_roles],
+            "conditional": [
+                "applicable amendments",
+                "debt and unrestricted-cash schedules",
+                "support for adjustments or add-backs",
+                "waiver or consent letters",
+                "required certificate form",
+            ],
+        }
         return json.dumps(snapshot, default=str)
 
     @tool
@@ -355,7 +388,22 @@ def build_agent_graph(workflow: CovenantWorkflow, *, checkpointer=None):
         location = application._documents.find_location(document_id)
         if str(location.get("case_id")) != case_id:
             raise ValueError("document does not belong to this case")
-        head = application._active_revision_repository().current(case_id)
+        repo = application._active_revision_repository()
+        snapshot = repo.snapshot(case_id)
+        roles = {
+            str(application._documents.find_location(item).get("document_role"))
+            for item in snapshot.get("documents", [])
+        }
+        missing = missing_required_document_roles(roles)
+        if missing:
+            return json.dumps({
+                "case_id": case_id,
+                "document_id": document_id,
+                "status": "awaiting_documents",
+                "missing_required": missing,
+                "message": "Processing has not started. Ask the user for the missing required documents.",
+            })
+        head = repo.current(case_id)
         store = application.app.state.durability_runtime.job_store
         try:
             job = store.enqueue(
@@ -385,9 +433,11 @@ def build_agent_graph(workflow: CovenantWorkflow, *, checkpointer=None):
     )
     return create_agent(
         model=model,
-        tools=[list_covenant_cases, inspect_case_state, ingest_covenant_document,
-               process_uploaded_document, run_covenant_case,
-               reevaluate_covenant_case],
+        # Only the persisted private-case path is agent-reachable. Legacy
+        # fixture run/ingest helpers remain callable by tests and old HTTP
+        # demos but cannot bypass the durable case workflow through the LLM.
+        tools=[list_covenant_cases, inspect_case_state,
+               process_uploaded_document],
         system_prompt=SYSTEM_PROMPT,
         checkpointer=checkpointer,
     )

@@ -63,6 +63,8 @@ export default function HomePage() {
           selectedSource={selectedSource}
           onSelectSource={setSelectedSource}
           onSelectStage={scrollToCard}
+          documentMeta={{}}
+          onPreviewDocument={() => undefined}
         />
       }
     />

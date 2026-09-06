@@ -25,8 +25,11 @@ export function replaceTranscript(next: TranscriptMessage[]) {
     name: message.name,
     status: message.status,
   }));
-  if (JSON.stringify(messages) === JSON.stringify(normalized)) return;
-  messages = normalized;
+  const visibleUserContent = new Set(normalized.filter((item) => item.role === "user").map((item) => item.content));
+  const optimistic = messages.filter((item) => item.id.startsWith("pending-upload-") && !visibleUserContent.has(item.content));
+  const merged = [...optimistic, ...normalized];
+  if (JSON.stringify(messages) === JSON.stringify(merged)) return;
+  messages = merged;
   emit();
 }
 

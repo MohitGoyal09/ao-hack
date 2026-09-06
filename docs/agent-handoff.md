@@ -1,5 +1,11 @@
 # Teammate handoff: Covenant Certificate
 
+Start with [DEMO_A_TO_Z.md](DEMO_A_TO_Z.md) for the current product flow,
+demo script, verified behavior, and open risks.
+
+The current chat, attachment, agent-tool, completion-summary, and conversation
+history contract is documented in [agent-interaction-flow.md](agent-interaction-flow.md).
+
 Last verified: 2026-09-06 against commit `d0cc6c6` plus the 2026-09-06
 build session described below (committed locally in focused commits, not pushed). Counts go stale with every phase;
 re-run the baseline commands instead of trusting them.

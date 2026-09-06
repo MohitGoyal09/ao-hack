@@ -6,7 +6,7 @@ import json
 import unittest
 from pathlib import Path
 
-from src.agent import ingest_document_for_case, reevaluate_case
+from src.agent import ingest_document_for_case, missing_required_document_roles, reevaluate_case
 from src.covenant import build_demo_workflow
 
 DATA_ROOT = Path(__file__).resolve().parents[3] / "data" / "raw"
@@ -42,6 +42,18 @@ class AgentDocumentToolsTest(unittest.TestCase):
     def test_ingest_rejects_unknown_kind(self):
         with self.assertRaises(ValueError):
             ingest_document_for_case("any-case", str(AGREEMENT_PDF), "email")
+
+    def test_pipeline_requires_agreement_and_financial_statement(self):
+        self.assertEqual(
+            missing_required_document_roles({"credit_agreement"}),
+            ["financial_statement"],
+        )
+        self.assertEqual(
+            missing_required_document_roles(
+                {"credit_agreement", "financial_statement", "amendment"}
+            ),
+            [],
+        )
 
     def test_reevaluate_case_returns_real_run(self):
         raw = reevaluate_case(self.workflow, self.case_id)

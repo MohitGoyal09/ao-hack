@@ -1,6 +1,6 @@
 "use client";
 
-import { docId, short, Snapshot } from "@/lib/api";
+import { docId, DocumentMeta, short, Snapshot } from "@/lib/api";
 import { deriveStages } from "@/lib/workflow";
 import { StatusBadge } from "./StatusBadge";
 import { useWorkspacePreference } from "./useWorkspacePreference";
@@ -16,14 +16,16 @@ type Props = {
   selectedSource: string | null;
   onSelectSource: (source: string | null) => void;
   onSelectStage: (anchorId: string) => void;
+  documentMeta: Record<string, DocumentMeta>;
+  onPreviewDocument: (document: DocumentMeta) => void;
 };
 
 type Panel = "progress" | "outputs" | "context";
 type OpenPanels = Record<Panel, boolean>;
 
 const STAGE_ANCHOR: Record<string, string> = {
-  documents: "card-documents",
-  agreement: "card-definitions",
+  documents: "card-case",
+  agreement: "card-agreement",
   definitions: "card-definitions",
   evidence: "card-evidence",
   calculation: "card-calculation",
@@ -31,7 +33,7 @@ const STAGE_ANCHOR: Record<string, string> = {
   package: "card-package",
 };
 
-export function ContextRail({ snapshot, events, disconnected, collapsed, onToggleCollapse, selectedSource, onSelectSource, onSelectStage }: Props) {
+export function ContextRail({ snapshot, events, disconnected, collapsed, onToggleCollapse, selectedSource, onSelectSource, onSelectStage, documentMeta, onPreviewDocument }: Props) {
   const [openPanels, setOpenPanels] = useWorkspacePreference<OpenPanels>("covenant.workspace.context-rail-panels", { progress: true, outputs: false, context: false });
   const stages = deriveStages(snapshot, events);
   const current = stages.find((stage) => stage.state === "blocked") ?? stages.find((stage) => stage.state === "failed") ?? stages.find((stage) => stage.state === "running") ?? stages.find((stage) => stage.state !== "complete") ?? stages.at(-1);
@@ -66,7 +68,7 @@ export function ContextRail({ snapshot, events, disconnected, collapsed, onToggl
           <ol className={s.stageList} aria-label="Seven workflow stages">
             {stages.map((stage, index) => (
               <li key={stage.id}>
-                <button type="button" className={s.stageItem} onClick={() => onSelectStage(STAGE_ANCHOR[stage.id] ?? "card-case")} aria-label={`Stage ${index + 1}: ${stage.title}, ${stage.state}. ${stage.detail}`}>
+                <button type="button" className={`${s.stageItem} ${s[`stage${stage.state[0].toUpperCase()}${stage.state.slice(1)}`]}`} onClick={() => onSelectStage(STAGE_ANCHOR[stage.id] ?? "card-case")} aria-label={`Stage ${index + 1}: ${stage.title}, ${stage.state}. ${stage.detail}`}>
                   <span className={s.stageRow}><span>{index + 1}. {stage.title}</span><StatusBadge state={stage.state} /></span>
                 </button>
               </li>
@@ -99,7 +101,7 @@ export function ContextRail({ snapshot, events, disconnected, collapsed, onToggl
         {openPanels.context && <div id={panelId("context")}>
           {!snapshot ? <p className={s.finePrintLight}>Open a case to inspect sources.</p> : <>
             <h4>Documents</h4>
-            {snapshot.documents.length ? snapshot.documents.map((document) => <div key={docId(document)} className={s.evItem}><code>{docId(document)}</code></div>) : <p className={s.finePrintLight}>No documents yet.</p>}
+            {snapshot.documents.length ? snapshot.documents.map((document) => { const id = docId(document); const meta = documentMeta[id] ?? { document_id: id }; return <button type="button" key={id} className={`${s.evItem} ${s.contextDocument}`} onClick={() => onPreviewDocument(meta)}><strong>{meta.title ?? `Source ${short(id)}`}</strong><small>{(meta.document_role ?? "document").replaceAll("_", " ")} · v{meta.version_number ?? 1}</small></button>; }) : <p className={s.finePrintLight}>No documents yet.</p>}
             <h4>Citations</h4>
             {rules.length ? rules.map((rule) => <div key={rule.external_rule_id} className={s.evItem}><code>{rule.external_rule_id}</code> <StatusBadge state={rule.support_state} /></div>) : <p className={s.finePrintLight}>No cited definitions yet.</p>}
             <h4>Current revision</h4>

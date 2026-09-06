@@ -160,7 +160,9 @@ class CasePipeline:
             raise TransientRunError(f"storage unavailable for {document_id}") from error
         self._append_event(
             case_id, org, revision_id, job.id, "DOCUMENT_READ",
-            {"job_id": job.id, "document_id": document_id},
+            {"job_id": job.id, "document_id": document_id,
+             "media_type": version.media_type,
+             "filename": version.title},
         )
         on_progress()
 

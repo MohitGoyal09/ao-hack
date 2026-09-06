@@ -5,18 +5,25 @@ import { CopilotChat } from "@copilotkit/react-core/v2";
 import { Attachments, Attachment, AttachmentInfo, AttachmentPreview, AttachmentRemove, PromptInput } from "@/components/ai-elements/attachments";
 import { api, CaseSummary, createCase, UploadResult } from "@/lib/api";
 import { canMutate, roleExplanation } from "@/lib/workflow";
-import { clearTranscript, replaceTranscript } from "@/components/ai-elements/transcript";
+import { appendTranscript, clearTranscript, replaceTranscript } from "@/components/ai-elements/transcript";
 import s from "./workspace.module.css";
 
-type Props = { caseName?: string | null; caseId?: string | null; role?: string; templates?: CaseSummary[]; onCreated?: (caseId: string) => void; onUploaded?: (result: UploadResult) => Promise<void> };
-const ACCEPTED_EXTENSIONS = new Set(["pdf", "json", "csv", "xlsx", "txt"]);
+type Props = { caseName?: string | null; caseId?: string | null; role?: string; templates?: CaseSummary[]; onCreated?: (caseId: string) => void; onUploaded?: (result: UploadResult) => Promise<void>; runState?: string; lastEventSequence?: number; openReviewIssues?: number; hasCalculation?: boolean };
+const ACCEPTED_EXTENSIONS = new Set(["pdf", "json", "csv", "xlsx", "txt", "html"]);
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const fileDetail = (file: File) => `${file.name.split(".").pop()?.toUpperCase() || "FILE"} · ${Math.max(1, Math.ceil(file.size / 1024))} KB`;
+export const inferDocumentRole = (filename: string) => {
+  const normalized = filename.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  if (normalized.includes("amend")) return "amendment";
+  if (["financial", "statement", "10-k", "10k", "annual-report"].some((token) => normalized.includes(token))) return "financial_statement";
+  return "credit_agreement";
+};
 
 function CopilotTranscriptBridge({ messages, running }: { messages: any[]; running: boolean }) {
   useEffect(() => {
     replaceTranscript((messages ?? [])
       .filter((message: any) => ["user", "assistant", "tool"].includes(message.role))
+      .filter((message: any) => !(message.role === "user" && typeof message.content === "string" && message.content.startsWith("<!--system-context")))
       .filter((message: any) => message.role === "user" || message.role === "tool" || (typeof message.content === "string" && message.content.trim()))
       .map((message: any, index: number) => ({
         id: String(message.id ?? `${message.role}-${index}`),
@@ -31,9 +38,11 @@ function CopilotTranscriptBridge({ messages, running }: { messages: any[]; runni
 
 /** One docked prompt for chat and audited document intake. The local primitives
  * mirror AI Elements because this repo does not use its Tailwind/shadcn stack. */
-export function CopilotComposer({ caseName, caseId = null, role = "viewer", templates = [], onCreated, onUploaded }: Props) {
+export function CopilotComposer({ caseName, caseId = null, role = "viewer", templates = [], onCreated, onUploaded, runState, lastEventSequence = 0, openReviewIssues = 0, hasCalculation = false }: Props) {
   const uploadInput = useRef<HTMLInputElement>(null);
   const agentSubmit = useRef<((message: string) => Promise<void>) | null>(null);
+  const pendingUploadMessage = useRef<string | null>(null);
+  const observedSequence = useRef<number | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [templateId, setTemplateId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -41,14 +50,32 @@ export function CopilotComposer({ caseName, caseId = null, role = "viewer", temp
   const [status, setStatus] = useState("");
   const mutate = canMutate(role);
   const isRoot = !caseId;
-  useEffect(() => { clearTranscript(); }, [caseId]);
+  useEffect(() => { clearTranscript(); observedSequence.current = null; }, [caseId]);
+
+  useEffect(() => {
+    if (!caseId) return;
+    if (observedSequence.current == null) {
+      observedSequence.current = lastEventSequence;
+      return;
+    }
+    if (lastEventSequence <= observedSequence.current) return;
+    if (!runState || !["completed", "waiting_review", "failed"].includes(runState)) return;
+    observedSequence.current = lastEventSequence;
+    void agentSubmit.current?.(
+      `<!--system-context Background processing reached ${runState} for case ${caseId} at durable event ${lastEventSequence}. ` +
+      `Inspect the current case state. Explain the result in plain language, including the ratio, comparator, threshold, material inputs and sources when a calculation exists. ` +
+      `If evidence is missing or ${openReviewIssues} review issues remain, explain the exact blocker and ask for only the next required document or human decision. ` +
+      `Current calculation present: ${hasCalculation}. -->`,
+    );
+  }, [caseId, runState, lastEventSequence, openReviewIssues, hasCalculation]);
 
   const selectFile = (event: ChangeEvent<HTMLInputElement>) => {
     const next = event.target.files?.[0] ?? null;
     setError(""); setStatus("");
     if (!next) return;
+    pendingUploadMessage.current = null;
     const extension = next.name.split(".").pop()?.toLowerCase() ?? "";
-    if (!ACCEPTED_EXTENSIONS.has(extension)) { setFile(null); setError("Use a PDF, JSON, CSV, XLSX, or TXT file."); return; }
+    if (!ACCEPTED_EXTENSIONS.has(extension)) { setFile(null); setError("Use a PDF, JSON, CSV, XLSX, HTML, or TXT file."); return; }
     if (next.size > MAX_UPLOAD_BYTES) { setFile(null); setError("This file is larger than the 50 MB upload limit."); return; }
     setFile(next);
     setStatus(`Attached ${next.name}. Press Enter to send.`);
@@ -68,8 +95,7 @@ export function CopilotComposer({ caseName, caseId = null, role = "viewer", temp
         setStatus("Private case created. Uploading and starting intake…");
       }
       const body = new FormData();
-      const lowerName = selectedFile.name.toLowerCase();
-      const documentRole = lowerName.includes("amend") ? "amendment" : lowerName.includes("financial") || lowerName.includes("10-k") || lowerName.includes("statement") ? "financial_statement" : "credit_agreement";
+      const documentRole = inferDocumentRole(selectedFile.name);
       body.set("file", selectedFile);
       body.set("document_role", documentRole);
       body.set("title", selectedFile.name);
@@ -87,6 +113,7 @@ export function CopilotComposer({ caseName, caseId = null, role = "viewer", temp
         `authorized tool, and tell me what evidence is still required. -->`,
       );
       setFile(null);
+      pendingUploadMessage.current = null;
       if (uploadInput.current) uploadInput.current.value = "";
       setStatus("");
       if (isRoot && targetCaseId) onCreated?.(targetCaseId);
@@ -107,14 +134,24 @@ export function CopilotComposer({ caseName, caseId = null, role = "viewer", temp
         const submit = async (event: FormEvent<HTMLFormElement>) => {
           event.preventDefault();
           const text = String(chat.inputValue ?? "").trim();
-          if (file) { await uploadFile(file, text); return; }
+          if (file) {
+            const visibleMessage = text || `Process the attached ${file.name}.`;
+            if (!pendingUploadMessage.current) {
+              const id = `pending-upload-${Date.now()}`;
+              pendingUploadMessage.current = id;
+              appendTranscript({ id, role: "user", content: visibleMessage, status: "complete" });
+            }
+            chat.onInputChange?.("");
+            await uploadFile(file, visibleMessage);
+            return;
+          }
           if (!text || chat.isRunning) return;
           await chat.onSubmitMessage?.(text);
         };
         return <div className={s.composerInner}>
           <CopilotTranscriptBridge messages={chat.messages ?? []} running={Boolean(chat.isRunning)} />
           <form onSubmit={submit} className={s.promptForm} aria-label="Message and document intake">
-            <input ref={uploadInput} type="file" accept=".pdf,.json,.csv,.xlsx,.txt" onChange={selectFile} hidden />
+            <input ref={uploadInput} type="file" accept=".pdf,.json,.csv,.xlsx,.html,.txt" onChange={selectFile} hidden />
             <PromptInput><div className={s.promptDock}>
               {file && <div className={s.promptHeader}><Attachments variant="inline"><Attachment>
                 <AttachmentPreview extension={file.name.split(".").pop()} /><AttachmentInfo name={file.name} detail={fileDetail(file)} />

@@ -17,7 +17,12 @@ async function forward(request: NextRequest, context: { params: Promise<{ path: 
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
   try {
     const response = await fetch(`${upstream}/api/${path.join("/")}${request.nextUrl.search}`, { method: request.method, headers, body, cache: "no-store" });
-    return new NextResponse(response.body, { status: response.status, headers: { "content-type": response.headers.get("content-type") ?? "application/json" } });
+    const responseHeaders = new Headers();
+    for (const name of ["content-type", "content-disposition", "cache-control", "x-content-type-options", "content-security-policy"]) {
+      const value = response.headers.get(name);
+      if (value) responseHeaders.set(name, value);
+    }
+    return new NextResponse(response.body, { status: response.status, headers: responseHeaders });
   } catch {
     return NextResponse.json({ detail: "Covenant API unavailable" }, { status: 503 });
   }

@@ -39,6 +39,7 @@ export type Snapshot = {
   review_issues?: ReviewIssue[]; artifacts?: { calculation?: CalculationArtifact } & Record<string, unknown>; financial_facts?: unknown; covenant_rules?: unknown; revisions?: Revision[];
 };
 export type UploadResult = { document_id: string; version_id: string; version_number: number; sha256: string; extraction_state: string; revision_id: string; job_id: string | null };
+export type DocumentMeta = { document_id: string; title?: string; document_role?: string; version_number?: number; sha256?: string; extraction_state?: string; media_type?: string; byte_size?: number };
 // GET /cases (member-scoped) and POST /cases (fresh case from a catalog template).
 export type CaseListItem = { case_id: string; name: string; template_case_id: string | null; test_date: string | null; created_at: string | null; run_state: string | null };
 export type CreatedCase = { case_id: string; organization_id: string; template_case_id: string; name: string };
@@ -119,6 +120,18 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(response.status, typeof detail === "string" ? detail : detail ? JSON.stringify(detail) : response.statusText);
   }
   return data as T;
+}
+export async function apiBlob(path: string): Promise<Blob> {
+  const response = await fetch(`/api/covenant${path}`, {
+    headers: { authorization: await bearer() },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try { detail = (await response.json() as { detail?: string }).detail ?? detail; } catch { /* keep status text */ }
+    throw new ApiError(response.status, detail);
+  }
+  return response.blob();
 }
 export const post = <T,>(path: string, body: unknown) => api<T>(path, { method: "POST", body: JSON.stringify(body) });
 export const listCases = () => api<CaseListItem[]>("/cases");
