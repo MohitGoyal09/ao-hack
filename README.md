@@ -198,4 +198,5 @@ data                SEC-sourced corpus (raw/, immutable), proposed annotations/,
 docs                handoff, implementation contract, architecture, evaluation, hosted setup, domain research, demo script
 scripts             create_status_report.py, seed_demo_identity.py (hosted demo identity), hosted_smoke.py
 references          read-only upstream integration references
+landing_page        3D animated Rux landing page (Vite + React + react-three-fiber) — standalone marketing front
 ```

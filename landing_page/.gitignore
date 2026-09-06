@@ -1,0 +1,14 @@
+node_modules
+dist
+.DS_Store
+*.local
+npm-install.log
+npm-install-err.log
+build.log
+preview.log
+dom.html
+chrome-err.log
+.chrome-test
+.chrome-cdp*
+.chrome-cdp-*
+.chrome-verify

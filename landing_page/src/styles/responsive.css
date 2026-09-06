@@ -1,0 +1,95 @@
+/* —— responsive —— */
+@media (max-width: 1020px) {
+  .hero-inner {
+    grid-template-columns: 1fr;
+    align-items: start;
+    padding-top: var(--sp-5);
+  }
+
+  .hero-visual {
+    min-height: 0;
+  }
+
+  .hero-scene {
+    height: 500px;
+  }
+
+  .human-grid {
+    grid-template-columns: 1fr;
+    gap: var(--sp-5);
+  }
+}
+
+@media (max-width: 760px) {
+  .nav-links {
+    display: none;
+  }
+
+  .hero-inner {
+    min-height: auto;
+  }
+
+  .hero-title {
+    font-size: clamp(2.8rem, 14vw, 4rem);
+  }
+
+  .hero-stats {
+    grid-template-columns: repeat(2, auto);
+    gap: var(--sp-3) var(--sp-4);
+  }
+
+  .hero-scene {
+    height: 420px;
+  }
+
+  .step {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    padding-left: calc(2.2rem);
+  }
+
+  .step-out {
+    justify-self: start;
+  }
+
+  .workflow-panel {
+    padding: var(--sp-4);
+  }
+
+  .progress-head {
+    flex-direction: column;
+    gap: var(--sp-1);
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-cta .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .hero-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .footer-top {
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .marquee-track,
+  .badge-dot,
+  .scroll-hint-line::after {
+    animation: none;
+  }
+
+  .card:hover,
+  .guarantee:hover {
+    transform: none;
+  }
+}

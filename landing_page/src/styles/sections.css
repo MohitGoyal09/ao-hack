@@ -1,0 +1,207 @@
+/* —— marquee —— */
+.marquee {
+  border-block: 1px solid var(--rule-soft);
+  background: var(--paper-deep);
+  overflow: hidden;
+  padding: 1.05rem 0;
+}
+
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee 28s linear infinite;
+}
+
+.marquee:hover .marquee-track {
+  animation-play-state: paused;
+}
+
+.marquee-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3rem;
+  padding-right: 3rem;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: 0.8rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.marquee-star {
+  font-style: normal;
+  color: var(--green-mid);
+  font-size: 0.7rem;
+}
+
+@keyframes marquee {
+  to { transform: translateX(-50%); }
+}
+
+/* —— engine cards —— */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: var(--sp-4);
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-5);
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-soft);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: transform var(--settle) var(--ease), border-color var(--settle) var(--ease),
+    box-shadow var(--settle) var(--ease);
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--green), var(--green-mid));
+  opacity: 0;
+  transition: opacity var(--settle) var(--ease);
+}
+
+.card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(20, 111, 105, 0.4);
+  box-shadow: 0 24px 60px rgba(24, 60, 54, 0.08);
+}
+
+.card:hover::before {
+  opacity: 1;
+}
+
+.card-tag {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: var(--mono-size);
+  letter-spacing: var(--mono-track);
+  color: var(--green);
+}
+
+.card-title {
+  font-family: var(--font-display);
+  font-weight: 300;
+  font-size: 1.6rem;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.card-body {
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+  flex: 1;
+}
+
+.card-chip {
+  align-self: flex-start;
+  margin-top: var(--sp-2);
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--rule-soft);
+  border-radius: 4px;
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: var(--mono-size);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+/* —— workflow timeline —— */
+.workflow-panel {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-soft);
+  border-radius: 10px;
+  padding: var(--sp-5) var(--sp-5) 0;
+  margin-top: var(--sp-4);
+}
+
+.timeline {
+  position: relative;
+  padding-bottom: var(--sp-1);
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 14px;
+  bottom: 14px;
+  width: 1.5px;
+  background: linear-gradient(var(--green), var(--green-pale));
+  opacity: 0.45;
+}
+
+.step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: var(--sp-4);
+  padding: 0 0 var(--sp-5) calc(2.6rem);
+}
+
+.step-dot {
+  position: absolute;
+  left: 0;
+  top: 0.35rem;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--paper-raised);
+  border: 1.5px solid var(--green);
+}
+
+.step-dot::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--green-mid);
+}
+
+.step-id {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: var(--mono-size);
+  letter-spacing: var(--mono-track);
+  color: var(--green);
+}
+
+.step-name {
+  font-family: var(--font-display);
+  font-weight: 300;
+  font-size: 1.35rem;
+  line-height: 1.2;
+  color: var(--ink);
+  margin: 0.3rem 0 0.35rem;
+}
+
+.step-body {
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+  max-width: 46ch;
+}
+
+.step-out {
+  align-self: start;
+  justify-self: end;
+  margin-top: 0.4rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--rule-soft);
+  border-radius: 4px;
+  background: var(--paper);
+  font-family: var(--font-mono);
+  font-size: var(--mono-size);
+  letter-spacing: 0.05em;
+  color: var(--green);
+  white-space: nowrap;
+}

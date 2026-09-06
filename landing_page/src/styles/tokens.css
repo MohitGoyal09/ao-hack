@@ -1,0 +1,50 @@
+:root {
+  /* —— impeccable-style palette (oklch → hex) —— */
+  --paper: #f7f5ec;
+  --paper-deep: #eeebe1;
+  --paper-raised: #fdfcf6;
+  --ink: #242218;
+  --ink-soft: #58554c;
+  --ink-faint: #74726a;
+  --green: #146f69;
+  --green-mid: #0fb6ac;
+  --green-pale: #8ed3cc;
+  --rule: rgba(36, 34, 24, 0.16);
+  --rule-soft: rgba(36, 34, 24, 0.08);
+
+  /* —— impeccable typography —— */
+  --font-display: 'Alumni Sans', 'Albert Sans', Arial, sans-serif;
+  --font-body: 'Albert Sans', 'Avenir Next', 'Helvetica Neue', Arial, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Roboto Mono', 'SFMono-Regular', Consolas, monospace;
+  --font-serif: 'Instrument Serif', Georgia, serif;
+
+  --display: clamp(3.2rem, 6.5vw, 5.4rem);
+  --display-line: 1.02;
+  --headline: clamp(2.4rem, 4vw, 3.3rem);
+  --headline-line: 1.05;
+  --title: 1.125rem;
+  --title-line: 1.35;
+  --body-size: 1rem;
+  --body-line: 1.8;
+  --eyebrow-size: 0.7rem;
+  --eyebrow-track: 0.2em;
+  --wordmark-size: 1.125rem;
+  --wordmark-track: 0.16em;
+  --mono-size: 0.6875rem;
+  --mono-track: 0.22em;
+
+  /* —— layout —— */
+  --w: 1200px;
+  --sp-1: 0.5rem;
+  --sp-2: 0.75rem;
+  --sp-3: 1rem;
+  --sp-4: 1.5rem;
+  --sp-5: 2rem;
+  --sp-6: 3rem;
+  --sp-7: 4.5rem;
+  --sp-8: 6rem;
+  --section: max(4.5rem, 8vw);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --quick: 0.12s;
+  --settle: 0.2s;
+}

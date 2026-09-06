@@ -1,0 +1,141 @@
+/* —— hero —— */
+.hero {
+  position: relative;
+  padding: clamp(3rem, 6vw, 5rem) var(--sp-4) 0;
+  overflow: hidden;
+}
+
+.hero-inner {
+  max-width: var(--w);
+  margin-inline: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
+  gap: var(--sp-6);
+  align-items: center;
+  min-height: 86vh;
+}
+
+.hero-copy {
+  padding-bottom: var(--sp-6);
+}
+
+.hero-title {
+  font-family: var(--font-display);
+  font-weight: 100;
+  font-size: var(--display);
+  line-height: var(--display-line);
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: var(--sp-4) 0 var(--sp-3);
+}
+
+.hero-sub {
+  max-width: 46ch;
+  color: var(--ink-soft);
+  font-size: 1.06rem;
+}
+
+.hero-sub strong {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.hero-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+}
+
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: var(--sp-4);
+  margin-top: var(--sp-6);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  border-left: 1px solid var(--rule);
+  padding-left: var(--sp-3);
+}
+
+.stat-num {
+  font-family: var(--font-display);
+  font-weight: 200;
+  font-size: 1.7rem;
+  line-height: 1;
+  color: var(--green);
+  letter-spacing: 0.01em;
+}
+
+.stat-label {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: var(--mono-size);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* —— 3D scene —— */
+.hero-visual {
+  position: relative;
+  min-height: 660px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hero-scene {
+  position: relative;
+  width: 100%;
+  height: 620px;
+}
+
+.scene-glow {
+  position: absolute;
+  inset: 8% 4%;
+  background:
+    radial-gradient(58% 46% at 50% 52%, rgba(15, 182, 172, 0.16), transparent 70%),
+    radial-gradient(42% 34% at 50% 45%, rgba(141, 211, 204, 0.2), transparent 72%);
+  filter: blur(6px);
+  pointer-events: none;
+}
+
+.hero-scene canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* —— scroll hint —— */
+.scroll-hint {
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-4) 0 var(--sp-5);
+}
+
+.scroll-hint-line {
+  position: relative;
+  width: 1px;
+  height: 44px;
+  background: var(--rule);
+  overflow: hidden;
+}
+
+.scroll-hint-line::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: -40%;
+  height: 40%;
+  background: var(--green-mid);
+  animation: scrollHint 2.2s var(--ease) infinite;
+}
+
+@keyframes scrollHint {
+  0% { top: -40%; }
+  60%, 100% { top: 110%; }
+}
