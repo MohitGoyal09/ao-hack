@@ -12,6 +12,7 @@
   </p>
 </div>
 
+
 ---
 
 Borrower-side treasury teams prepare loan-covenant compliance certificates by hand: the credit agreement's own definitions decide what counts as debt and EBITDA, the measurement period has to match, amendments change thresholds mid-life, and an authorized officer signs. Getting it wrong is an event of default. **Covenant Certificate** automates that workflow end to end — upload the agreement and financials, extract and cite the covenant rule, calculate deterministically, stop for human review whenever evidence is missing or a period does not match, re-run when an amendment lands, and let an officer approve the exact locked numbers — while never letting the model be the authority on a number or a verdict. It produces an officer-reviewed *draft*, not legal advice and never a signed certificate.
