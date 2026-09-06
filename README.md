@@ -22,62 +22,55 @@ New engineers and coding agents: start at [`docs/agent-handoff.md`](docs/agent-h
 
 ```mermaid
 flowchart TB
-    subgraph Client ["🖥️ Client Layer (Next.js 16 + React 19 + CopilotKit)"]
-        direction TB
-        Landing["Landing Page (/)<br/>• Prepared Starters<br/>• 1-Click Case Creation"]
-        Workbench["Workbench (/cases/:id)<br/>• Live Event Feed<br/>• Copilot Chat over AG-UI<br/>• Review Inbox & Revision Panel"]
-        Workpaper["Printable Workpaper (/cases/:id/workpaper)<br/>• Audit DRAFT Watermark<br/>• Locked Formula & Citations"]
-        Proxy["Next.js Same-Origin Proxy<br/>/api/covenant/* & /api/copilotkit/*"]
+    subgraph Client ["Client Layer - Next.js 16, React 19, CopilotKit"]
+        Landing["Landing Page /<br/>Prepared Starters and 1-Click Case Creation"]
+        Workbench["Workbench /cases/:id<br/>Live Event Feed, Copilot Chat, Review Inbox"]
+        Workpaper["Printable Workpaper /cases/:id/workpaper<br/>Audit DRAFT Watermark and Citations"]
+        Proxy["Next.js Same-Origin Proxy<br/>/api/covenant and /api/copilotkit"]
         
         Landing --> Proxy
         Workbench --> Proxy
         Workpaper --> Proxy
     end
 
-    subgraph Gateway ["⚡ API Gateway & Agent Runtime (FastAPI :8123)"]
-        direction TB
-        FastAPI["FastAPI Gateway (main.py)<br/>• REST Routes & Auth Validation<br/>• Readiness & Durability Health Gate"]
+    subgraph Gateway ["API Gateway and Agent Runtime - FastAPI :8123"]
+        FastAPI["FastAPI Gateway (main.py)<br/>REST Routes, Auth and Health Gates"]
         AGUI["AG-UI Protocol Endpoint (/ag-ui)"]
-        Agent["4-Tool LangGraph Copilot Agent (src/agent.py)<br/>• Proposes tools & inspects readiness<br/>• Dispatches by keyword or LLM"]
+        Agent["4-Tool LangGraph Copilot Agent<br/>Proposes Tools and Inspects Case Readiness"]
         
         Proxy --> FastAPI
         Proxy --> AGUI
         AGUI --> Agent
     end
 
-    subgraph Core ["⚙️ Covenant Core Engine (Deterministic Python)"]
-        direction TB
-        subgraph Pipeline ["9-Node LangGraph Covenant Workflow"]
-            N1["1. Resolve Documents"] --> N2["2. Compile Definitions & Clauses"]
-            N2 --> N3["3. Map Financial Evidence"]
-            N3 --> N4["4. Typed Decimal Calculator<br/>(Exact arithmetic · No eval · Zero hallucination)"]
-            N4 --> N5{"5. Fail-Closed Policy Engine"}
-            N5 -- "Period Mismatch or Missing Proof" --> N6["6. Human Review Pause<br/>(NEEDS_REVIEW · Requires reason)"]
-            N5 -- "Evidence & Period Verified" --> N7["7. Assemble Evidence Manifest"]
-            N6 -. "Controller Decision Recorded" .-> N7
-            N7 --> N8["8. Render Draft Package"]
-            N8 --> N9["9. Finalize Head Revision & Package Hash"]
-        end
+    subgraph Core ["Covenant Core Engine - Deterministic Python"]
+        N1["1. Resolve Documents"] --> N2["2. Compile Definitions and Clauses"]
+        N2 --> N3["3. Map Financial Evidence"]
+        N3 --> N4["4. Typed Decimal Calculator<br/>Exact arithmetic - No eval - Zero hallucination"]
+        N4 --> N5{"5. Fail-Closed Policy Engine"}
+        N5 -- "Period Mismatch or Missing Proof" --> N6["6. Human Review Pause<br/>NEEDS_REVIEW - Requires Reason"]
+        N5 -- "Evidence and Period Verified" --> N7["7. Assemble Evidence Manifest"]
+        N6 -. "Controller Decision Recorded" .-> N7
+        N7 --> N8["8. Render Draft Package"]
+        N8 --> N9["9. Finalize Head Revision and Package Hash"]
         
-        FastAPI --> Pipeline
-        Agent -. "Calls authorized case tools" .-> Pipeline
+        FastAPI --> N1
+        Agent -. "Calls authorized tools" .-> N1
     end
 
-    subgraph Durability ["🔒 Durability & Storage Layer"]
-        direction TB
-        Postgres[("Supabase / PostgreSQL<br/>• Revisions & Checkpoints<br/>• Fenced Job Queue<br/>• Durable Domain Events")]
-        Storage[("Private Object Storage<br/>• Immutable Hashed Documents<br/>• SHA-256 Identification")]
-        Worker[["Background Job Worker<br/>(python -m src.platform.worker)<br/>• Leases with Fencing Tokens<br/>• Heartbeat Monitoring")]
+    subgraph Durability ["Durability and Storage Layer"]
+        Postgres["Supabase / PostgreSQL<br/>Revisions, Checkpoints, Fenced Queue, Events"]
+        Storage["Private Object Storage<br/>Immutable Hashed Documents - SHA-256"]
+        Worker["Background Job Worker<br/>python -m src.platform.worker<br/>Leases with Fencing Tokens and Heartbeats"]
         
-        Pipeline <--> Postgres
-        Pipeline <--> Storage
-        Worker -. "Polls & executes jobs" .-> Pipeline
+        N1 <--> Storage
+        N9 <--> Postgres
+        Worker -. "Polls and executes jobs" .-> Core
     end
 
-    subgraph Governance ["🛡️ Human Governance & Officer Boundary"]
-        direction TB
-        ApprovalGate["Officer Approval Gateway<br/>• Binds Officer Identity + Revision<br/>• Verifies Immutable Package Hash<br/>• Rejects Superseded Revisions (409)"]
-        AuditPackage["Locked Draft Package (JSON / PDF Workpaper)<br/>• Unalterable Calculation<br/>• Page-Level Agreement Citations<br/>• Never Electronic Signature / Not Legal Advice"]
+    subgraph Governance ["Human Governance and Officer Boundary"]
+        ApprovalGate["Officer Approval Gateway<br/>Binds Officer Identity + Revision<br/>Verifies Immutable Package Hash"]
+        AuditPackage["Locked Draft Package - JSON and PDF Workpaper<br/>Unalterable Calculation and Citations<br/>Never Electronic Signature / Not Legal Advice"]
         
         N9 --> ApprovalGate
         ApprovalGate --> AuditPackage
@@ -91,7 +84,7 @@ flowchart TB
 
     class Landing,Workbench,Workpaper,Proxy client;
     class FastAPI,AGUI,Agent gateway;
-    N1,N2,N3,N4,N5,N6,N7,N8,N9 core;
+    class N1,N2,N3,N4,N5,N6,N7,N8,N9 core;
     class Postgres,Storage,Worker storage;
     class ApprovalGate,AuditPackage gov;
 ```
